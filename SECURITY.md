@@ -48,8 +48,10 @@ Source URLs come from users and are fetched by the server. Controls in `backend/
 
 - Luma is accessed only through its official API, as its Terms of Use require. No luma.com pages are
   scraped, and the test fixtures are synthetic.
-- Only public events are stored. Guest-only addresses are reduced to the city. Meeting links and
-  submitter details (including emails) are never stored.
+- Only public events managed by the registered calendar are stored. Events managed by other hosts
+  are excluded. Guest-only addresses are reduced to the city. Meeting links and submitter details
+  (including emails) are never stored, and personal calendar names are not stored as organisers.
+- Cover images are stored as URLs only. Luma's terms forbid downloading images as stand-alone files.
 
 ### Notification abuse
 

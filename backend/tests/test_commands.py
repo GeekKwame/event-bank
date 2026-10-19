@@ -67,13 +67,16 @@ def test_add_source_passes_config_to_luma(mocked_network, monkeypatch):
         "https://lu.ma/example-tech",
         "--config",
         "api_key_env=LUMA_API_KEY_ACCRA",
-        "--config",
-        "include_listed_events=false",
         stdout=out,
     )
     source = Source.objects.get()
     assert source.connector == "luma"
-    assert source.config == {"api_key_env": "LUMA_API_KEY_ACCRA", "include_listed_events": False}
+    assert source.config == {"api_key_env": "LUMA_API_KEY_ACCRA"}
+
+    with pytest.raises(CommandError, match="invalid_config"):
+        call_command(
+            "add_source", "https://lu.ma/other-cal", "--config", "include_listed_events=true"
+        )
 
 
 def test_ingest_source_errors(example_connector, mocked_network):

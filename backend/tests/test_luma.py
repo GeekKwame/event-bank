@@ -101,13 +101,13 @@ def test_canonicalizes_to_luma_com():
 
 
 def test_validate_config():
-    assert LumaCalendarConnector.validate_config(
-        {"api_key_env": "LUMA_API_KEY_ACCRA", "include_listed_events": "true"}
-    ) == {"api_key_env": "LUMA_API_KEY_ACCRA", "include_listed_events": True}
+    assert LumaCalendarConnector.validate_config({"api_key_env": "LUMA_API_KEY_ACCRA"}) == {
+        "api_key_env": "LUMA_API_KEY_ACCRA"
+    }
     for bad in (
         {"api_key_env": "DJANGO_SECRET_KEY"},
         {"api_key_env": "LUMA_API_KEYX"},
-        {"include_listed_events": "maybe"},
+        {"include_listed_events": "true"},
         {"api_key": "inline-secret"},
     ):
         with pytest.raises(ConnectorError) as excinfo:
@@ -180,9 +180,29 @@ def test_requests_use_the_api_key_header_and_expected_query(api):
     assert api.requests[2].url.params["pagination_cursor"] == "cursor-page-2"
 
 
-def test_include_listed_events_requests_view_access(api):
-    collect(api, config={"include_listed_events": True})
-    assert api.requests[1].url.params.get_list("access") == ["manage", "view"]
+def test_events_managed_by_other_hosts_are_never_collected(api):
+    listed = copy.deepcopy(api.pages[None]["entries"][0])
+    listed.update(id="evt-synthetic0099", access="view")
+    api.pages[None]["entries"].append(listed)
+
+    events = collect(api)
+
+    assert "evt-synthetic0099" not in {event.external_id for event in events}
+    for request in api.requests[1:]:
+        assert request.url.params.get_list("access") == ["manage"]
+
+
+@pytest.mark.parametrize("is_personal", [True, None])
+def test_personal_calendar_names_are_not_stored_as_organiser(api, is_personal):
+    if is_personal is None:
+        del api.calendar["is_personal"]
+    else:
+        api.calendar["is_personal"] = is_personal
+
+    events = collect(api)
+
+    assert events
+    assert all(event.organizer_name is None for event in events)
 
 
 def test_rejects_api_key_for_a_different_calendar(api):

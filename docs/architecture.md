@@ -80,6 +80,11 @@ A run with zero valid events fails with `no_events`, because that usually means 
   calendar slug equals the registered slug. Then it pages through `GET /v1/calendars/events/list`
   (`after` = now minus 24 hours, 50 per page, at most 10 pages), sending the key in the
   `x-luma-api-key` header.
+- Only events the calendar manages are requested (`access=manage`), and any entry Luma doesn't mark
+  `access: "manage"` is dropped. Events managed by other hosts are excluded pending Luma's written
+  confirmation that redistributing them is permitted.
+- For personal calendars (`is_personal` true or missing), no organiser name is stored, because the
+  calendar name may be a person's name.
 - Only events with `visibility: public` are kept. If `location_visibility` is not `public`, the venue
   and street address are dropped and only the city is kept. (Luma returns full addresses for events
   the calendar manages, even when the host limited them to guests.) Meeting URLs, registration

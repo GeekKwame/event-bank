@@ -9,6 +9,10 @@ sent to public-api.luma.com.
 The registered source URL (https://luma.com/<calendar-slug>) identifies the
 calendar; every run checks that the API key belongs to that calendar.
 
+Only events the calendar itself manages are collected. Events listed on the
+calendar but managed by other hosts (`access=view`) are excluded until Luma
+confirms in writing that redistributing them is permitted.
+
 Field mapping follows Luma's published OpenAPI schema for
 `GET /v1/calendars/get` and `GET /v1/calendars/events/list`.
 """
@@ -44,23 +48,10 @@ LOOKBACK = timedelta(days=1)
 _API_KEY_ENV_NAME = re.compile(r"LUMA_API_KEY(?:_[A-Z0-9]+)*")
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}")
 _ONLINE_LOCATION_TYPES = frozenset({"discord", "meet", "twitch", "twitter", "youtube", "zoom"})
-_TRUE = {"1", "true", "yes", "on"}
-_FALSE = {"0", "false", "no", "off"}
 
 
 def _calendar_slug(url: str) -> str:
     return urlsplit(url).path.strip("/").lower()
-
-
-def _parse_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in _TRUE:
-        return True
-    if text in _FALSE:
-        return False
-    raise ConnectorError(f"Expected true or false, got {value!r}", code="invalid_config")
 
 
 def _parse_api_datetime(value: Any) -> datetime | None:
@@ -95,7 +86,7 @@ class LumaCalendarConnector(Connector):
 
     @classmethod
     def validate_config(cls, config: Mapping[str, Any]) -> dict[str, Any]:
-        unknown = sorted(set(config) - {"api_key_env", "include_listed_events"})
+        unknown = sorted(set(config) - {"api_key_env"})
         if unknown:
             raise ConnectorError(f"Unknown Luma config keys: {unknown}", code="invalid_config")
         cleaned: dict[str, Any] = {}
@@ -107,8 +98,6 @@ class LumaCalendarConnector(Connector):
                     code="invalid_config",
                 )
             cleaned["api_key_env"] = name
-        if "include_listed_events" in config:
-            cleaned["include_listed_events"] = _parse_bool(config["include_listed_events"])
         return cleaned
 
     @classmethod
@@ -124,7 +113,7 @@ class LumaCalendarConnector(Connector):
         return {"api_key": api_key}
 
     def collect(self, source: SourceSpec, fetcher: Fetcher) -> Iterator[RawEvent]:
-        config = self.validate_config(source.config)
+        self.validate_config(source.config)
         api_key = source.credentials.get("api_key")
         if not api_key:
             raise ConnectorError("Luma API key is missing", code="missing_credentials")
@@ -138,7 +127,10 @@ class LumaCalendarConnector(Connector):
                 "The API key belongs to a different Luma calendar than the registered URL",
                 code="calendar_mismatch",
             )
-        organizer = _text(calendar.get("name"))
+        # A personal calendar's name may be a person's name, so it is not stored as the organiser.
+        organizer = (
+            None if calendar.get("is_personal") is not False else _text(calendar.get("name"))
+        )
 
         after = (self.clock() - LOOKBACK).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         params = [
@@ -148,8 +140,6 @@ class LumaCalendarConnector(Connector):
             ("pagination_limit", str(PAGE_SIZE)),
             ("access", "manage"),
         ]
-        if config.get("include_listed_events"):
-            params.append(("access", "view"))
 
         cursor = None
         for _ in range(MAX_PAGES):
@@ -187,7 +177,11 @@ class LumaCalendarConnector(Connector):
         entry: Mapping[str, Any], *, organizer_name: str | None = None
     ) -> RawEvent | None:
         """Map one Luma event, or return None for events that must not be published."""
-        if entry.get("platform", "luma") != "luma" or entry.get("visibility") != "public":
+        if (
+            entry.get("platform", "luma") != "luma"
+            or entry.get("visibility") != "public"
+            or entry.get("access") != "manage"
+        ):
             return None
         external_id = _text(entry.get("id"))
         if external_id is None:
