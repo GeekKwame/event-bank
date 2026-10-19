@@ -41,8 +41,13 @@ docker compose exec backend python manage.py add_source https://luma.com/<calend
 Each run checks that the key belongs to the registered calendar and fetches upcoming events
 (from 24 hours ago onwards). Only `public` events are stored. When a host shows the address
 only to guests, only the city is kept. Meeting links and submitter details are never stored.
-`--config include_listed_events=true` also includes events listed on the calendar but managed
-elsewhere; for those, Luma itself limits the location to city level.
+For personal calendars, the calendar name (which may be a person's name) is not stored as the
+organiser.
+
+Only events the calendar itself manages are collected. Events listed on the calendar but managed
+by other hosts are excluded until Luma confirms in writing that redistributing them is permitted.
+Event Bank has not yet been run against the live Luma API: do not run `ingest_source` on a Luma
+source until Luma has confirmed that your intended use is permitted.
 
 ## Stack
 
