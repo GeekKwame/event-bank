@@ -65,3 +65,9 @@ After changing dependencies, run `uv lock` in `backend/` and commit the lock fil
 - [Adding a connector](docs/adding-a-connector.md)
 - [Security policy and threat model](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
+
+## License
+
+Event Bank is licensed under the GNU Affero General Public License v3.0 only
+(SPDX: `AGPL-3.0-only`); see [LICENSE](LICENSE). If you run a modified version as a network
+service, you must offer its source code to that service's users.
