@@ -12,7 +12,7 @@ from apps.notifications.providers.base import (
 from apps.notifications.providers.console import ConsoleSMSProvider
 from apps.notifications.providers.mnotify import MNotifyProvider
 
-API_KEY = "test-api-key-12345"
+API_KEY = "mnotify-test-key-0000000000"
 
 
 def provider(handler):

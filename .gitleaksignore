@@ -1,0 +1,3 @@
+# Reviewed false positives. Each line is a gitleaks finding fingerprint.
+# Fake mNotify API key used only in tests (replaced by a low-entropy placeholder in a later commit).
+8fbb0056f591b71c207f04d7ea2d415a27c91dec:backend/tests/test_mnotify.py:generic-api-key:15
