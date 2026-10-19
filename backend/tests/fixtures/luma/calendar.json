@@ -1,0 +1,21 @@
+{
+  "id": "cal-synthetic0001",
+  "launch_status": "launched",
+  "tint_color": null,
+  "name": "Example Tech Community",
+  "slug": "example-tech",
+  "avatar_url": null,
+  "url": "https://luma.com/example-tech",
+  "description": "A fictional calendar used in Event Bank tests.",
+  "social_image_url": null,
+  "cover_image_url": null,
+  "is_personal": false,
+  "location": null,
+  "coordinate": null,
+  "instagram_handle": null,
+  "twitter_handle": null,
+  "youtube_handle": null,
+  "tiktok_handle": null,
+  "linkedin_handle": null,
+  "website": null
+}

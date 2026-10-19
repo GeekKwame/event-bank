@@ -32,11 +32,24 @@ Source URLs come from users and are fetched by the server. Controls in `backend/
 ### Secrets
 
 - Secrets come from environment variables only. `.env` is git-ignored, and CI runs a gitleaks scan.
+- Connector credentials (e.g. Luma API keys) are read from the environment at run time. A source's
+  config can only name an allowed variable (`LUMA_API_KEY` / `LUMA_API_KEY_*`), never hold the secret.
+  Luma calendar keys grant full access to their calendar. They are sent only in a header to
+  `public-api.luma.com`, never in URLs, and never forwarded on cross-host redirects.
+- Log redaction also covers the values of environment variables whose names contain `KEY`, `SECRET`,
+  `TOKEN` or `PASSWORD` (values of 8 or more characters).
 - With `DEBUG` off, the app refuses to start with a placeholder or short `DJANGO_SECRET_KEY`.
 - All log output passes through a formatter that redacts the configured secrets and secret-looking
   query parameters (`key=`, `token=`, ...), including in tracebacks. The `httpx` and `httpcore`
   loggers are limited to warnings because mNotify puts its API key in the URL.
 - Provider and ingestion errors store only safe messages. Unexpected exceptions are recorded by type name only.
+
+### Third-party data
+
+- Luma is accessed only through its official API, as its Terms of Use require. No luma.com pages are
+  scraped, and the test fixtures are synthetic.
+- Only public events are stored. Guest-only addresses are reduced to the city. Meeting links and
+  submitter details (including emails) are never stored.
 
 ### Notification abuse
 

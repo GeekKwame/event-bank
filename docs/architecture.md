@@ -14,7 +14,7 @@ backend/
 │   ├── http.py        SafeFetcher and URL/DNS validation
 │   ├── registry.py    Slug registry, URL matching, autodiscovery of connectors/platforms/
 │   ├── extract/       Reusable extractors (jsonld.py)
-│   └── platforms/     One module per supported platform (none shipped yet)
+│   └── platforms/     One module per supported platform (luma.py: Luma official API)
 ├── pipeline/          Pure Python. normalize.py, fingerprint.py, diff.py
 ├── apps/
 │   ├── common/        Health endpoint, DenyAll default permission, log redaction, phone numbers
@@ -39,15 +39,17 @@ Allowed imports point downwards only:
 
 1. Refuses sources that are not `approved`.
 2. Creates a `SourceRun` (status `running`) before any network I/O, so failures are always recorded.
-3. Builds a `FetchPolicy` from the connector's `allowed_hosts` and settings, and gives the connector
+3. Validates the source's `config` and resolves its credentials from environment variables
+   (`Connector.credentials_from_env`). Secrets are never stored in the database.
+4. Builds a `FetchPolicy` from the connector's `allowed_hosts` and settings, and gives the connector
    a `SafeFetcher`. Connectors never open connections themselves.
-4. Calls `connector.collect()`, capped at 500 events.
-5. Normalises with `pipeline.normalize_events()`: cleans text, converts times to UTC (naive times
+5. Calls `connector.collect()`, capped at 500 events.
+6. Normalises with `pipeline.normalize_events()`: cleans text, converts times to UTC (naive times
    use the event's timezone, then the source's), canonicalises URLs (only http/https survive),
    drops invalid events and duplicate external IDs with a recorded reason.
-6. Opens one database transaction, locks the `Source` row (serialising concurrent runs of the same
+7. Opens one database transaction, locks the `Source` row (serialising concurrent runs of the same
    source), and calls `upsert_events()`.
-7. Marks the run `succeeded` with counts, or `failed` with an error code and a redacted message.
+8. Marks the run `succeeded` with counts, or `failed` with an error code and a redacted message.
 
 Network I/O happens outside the transaction. Any exception rolls back all event changes for that run.
 A run with zero valid events fails with `no_events`, because that usually means the page format changed.
@@ -66,6 +68,26 @@ A run with zero valid events fails with `no_events`, because that usually means 
   `attendance_mode`, `status`. Title, description, URL and image edits are recorded but not significant.
 - Events missing from a fetch are never deleted or modified.
 - Cross-source deduplication (the same event listed on two platforms) is not implemented.
+
+## Luma connector
+
+`connectors/platforms/luma.py` uses Luma's official API only:
+
+- Registered URLs are calendar pages (`https://luma.com/<slug>`; `lu.ma` and `www.luma.com` are
+  canonicalised to `luma.com`). They identify the calendar and are never fetched. The fetcher may
+  only contact `public-api.luma.com` (`allowed_hosts` vs `url_hosts`).
+- Each run calls `GET /v1/calendars/get` and fails with `calendar_mismatch` unless the key's
+  calendar slug equals the registered slug. Then it pages through `GET /v1/calendars/events/list`
+  (`after` = now minus 24 hours, 50 per page, at most 10 pages), sending the key in the
+  `x-luma-api-key` header.
+- Only events with `visibility: public` are kept. If `location_visibility` is not `public`, the venue
+  and street address are dropped and only the city is kept. (Luma returns full addresses for events
+  the calendar manages, even when the host limited them to guests.) Meeting URLs, registration
+  questions and submitter details are never mapped.
+- The list endpoint returns no description or cancellation status, so Luma events are stored
+  without a description. Luma deletes cancelled events, so cancellation shows up as an event no longer
+  being returned, and missing events are never deleted. Detecting cancellations needs a later design
+  (e.g. Luma webhooks or per-event lookups).
 
 ## Source lifecycle
 

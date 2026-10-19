@@ -1,6 +1,7 @@
 import itertools
 import logging
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Mapping
 
 from django.db import transaction
 from django.utils import timezone
@@ -49,6 +50,7 @@ def ingest_source(
     *,
     trigger: str = SourceRun.Trigger.MANUAL,
     fetcher_factory: FetcherFactory = SafeFetcher,
+    environ: Mapping[str, str] = os.environ,
 ) -> SourceRun:
     """Fetch one approved source and upsert its events in a single transaction.
 
@@ -64,7 +66,13 @@ def ingest_source(
     run = SourceRun.objects.create(source=source, trigger=trigger)
     try:
         connector_cls = get_connector(source.connector)
-        spec = SourceSpec(url=source.url, timezone=source.timezone, config=source.config)
+        config = connector_cls.validate_config(source.config)
+        spec = SourceSpec(
+            url=source.url,
+            timezone=source.timezone,
+            config=config,
+            credentials=connector_cls.credentials_from_env(config, environ),
+        )
         fetcher = fetcher_factory(fetch_policy_for(connector_cls))
         try:
             raw_events = list(

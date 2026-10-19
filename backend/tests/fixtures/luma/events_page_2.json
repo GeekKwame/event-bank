@@ -1,0 +1,47 @@
+{
+  "entries": [
+    {
+      "platform": "luma",
+      "id": "evt-synthetic0005",
+      "user_id": "usr-synthetic0002",
+      "calendar_id": "cal-synthetic0001",
+      "start_at": "2026-12-10T09:00:00.000Z",
+      "duration_interval": "PT8H",
+      "end_at": "2026-12-10T17:00:00.000Z",
+      "created_at": "2026-10-05T09:00:00.000Z",
+      "timezone": "Africa/Accra",
+      "name": "Example Hackathon",
+      "geo_address_json": {
+        "address": "Example Campus",
+        "city": "Kumasi",
+        "region": "Ashanti",
+        "country": "Ghana",
+        "city_state": "Kumasi, Ashanti",
+        "full_address": null,
+        "google_maps_place_id": null,
+        "apple_maps_place_id": null,
+        "description": null
+      },
+      "coordinate": {"latitude": 6.69, "longitude": -1.62},
+      "meeting_url": null,
+      "location_type": "offline",
+      "location_visibility": "public",
+      "cover_url": "https://images.example.org/covers/hackathon.png",
+      "registration_questions": [],
+      "url": "example-hackathon",
+      "visibility": "public",
+      "waitlist_status": "enabled",
+      "registration_open": true,
+      "require_approval": false,
+      "max_capacity": 200,
+      "can_register_for_multiple_tickets": false,
+      "spots_remaining": 0,
+      "display_price": null,
+      "feedback_email": {"enabled": false},
+      "access": "manage",
+      "tags": [],
+      "submitted_by": null
+    }
+  ],
+  "has_more": false
+}

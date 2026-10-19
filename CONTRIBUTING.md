@@ -35,3 +35,8 @@ CI runs the same checks, plus a dependency audit and a secret scan.
 - Never commit secrets, real phone numbers or personal data, including in fixtures.
 - Add or update documentation when behaviour changes.
 - Report security issues privately (see [SECURITY.md](SECURITY.md)).
+
+## License of contributions
+
+Event Bank is licensed under `AGPL-3.0-only`. By submitting a contribution, you agree that it is
+licensed under the same terms.

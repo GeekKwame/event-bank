@@ -14,3 +14,7 @@ updates:
     directory: /backend
     schedule:
       interval: weekly
+    ignore:
+      # Python 3.13 is the supported runtime; moving to a new minor version is a deliberate decision.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

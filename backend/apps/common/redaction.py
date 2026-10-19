@@ -1,9 +1,11 @@
 import logging
+import os
 import re
 from collections.abc import Iterable
 
 REDACTED = "[REDACTED]"
-MIN_SECRET_LENGTH = 4
+# Shorter values (e.g. "true" in FEATURE_TOKEN_ENABLED) would redact ordinary words.
+MIN_SECRET_LENGTH = 8
 
 _SECRET_QUERY_PARAM = re.compile(
     r"(?i)\b(key|api_key|apikey|token|access_token|secret|password|signature)=([^&\s'\"]+)"
@@ -17,13 +19,18 @@ def redact(text: str, secrets: Iterable[str] = ()) -> str:
     return _SECRET_QUERY_PARAM.sub(lambda match: f"{match.group(1)}={REDACTED}", text)
 
 
+_SECRET_ENV_NAME = re.compile(r"(KEY|SECRET|TOKEN|PASSWORD)", re.IGNORECASE)
+
+
 def configured_secrets() -> list[str]:
+    """Secrets from settings plus any environment variable whose name looks secret."""
     from django.conf import settings
 
     return [
         settings.SECRET_KEY,
         settings.MNOTIFY_API_KEY,
         settings.DATABASES["default"].get("PASSWORD", ""),
+        *(value for name, value in os.environ.items() if _SECRET_ENV_NAME.search(name)),
     ]
 
 
