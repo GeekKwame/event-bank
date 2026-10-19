@@ -22,6 +22,17 @@ Resolver = Callable[[str, int], Sequence[str]]
 Clock = Callable[[], float]
 
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_RESERVED_HEADERS = frozenset(
+    {
+        "host",
+        "cookie",
+        "user-agent",
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "transfer-encoding",
+    }
+)
 DEFAULT_ACCEPTED_CONTENT_TYPES = frozenset(
     {"text/html", "application/xhtml+xml", "application/ld+json", "application/json"}
 )
@@ -219,12 +230,22 @@ class SafeFetcher:
     def close(self) -> None:
         self._client.close()
 
-    def get(self, url: str) -> FetchResponse:
+    def get(self, url: str, *, headers: Mapping[str, str] | None = None) -> FetchResponse:
+        """GET `url`. Extra `headers` (e.g. API keys) are only sent to the original host."""
+        extra_headers = dict(headers or {})
+        reserved = sorted(name for name in extra_headers if name.lower() in _RESERVED_HEADERS)
+        if reserved:
+            raise ValueError(f"Headers managed by SafeFetcher cannot be overridden: {reserved}")
+
         deadline = self._clock() + self.policy.total_timeout
         current = url
+        origin_host = None
         for _ in range(self.policy.max_redirects + 1):
             target = validate_url(current, self.policy, resolver=self._resolver)
-            status, headers, body = self._request(target, deadline)
+            if origin_host is None:
+                origin_host = target.url.host
+            hop_headers = extra_headers if target.url.host == origin_host else {}
+            status, headers, body = self._request(target, deadline, hop_headers)
             if status in REDIRECT_STATUSES:
                 location = headers.get("location")
                 if not location:
@@ -243,7 +264,7 @@ class SafeFetcher:
         return remaining
 
     def _request(
-        self, target: ValidatedTarget, deadline: float
+        self, target: ValidatedTarget, deadline: float, extra_headers: Mapping[str, str]
     ) -> tuple[int, Mapping[str, str], bytes]:
         policy = self.policy
         shown = display_url(target.url)
@@ -259,6 +280,7 @@ class SafeFetcher:
             "GET",
             target.pinned_url,
             headers={
+                **extra_headers,
                 "Host": target.url.netloc.decode("ascii"),
                 "User-Agent": policy.user_agent,
                 "Accept": ", ".join(sorted(policy.accepted_content_types)),

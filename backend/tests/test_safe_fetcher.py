@@ -335,6 +335,33 @@ def test_decodes_declared_charset():
         assert fetcher.get(f"https://{HOST}/").text == "café"
 
 
+def test_extra_headers_are_not_forwarded_to_other_hosts():
+    seen = []
+
+    def handler(request):
+        seen.append((request.headers["Host"], request.headers.get("x-api-key")))
+        if request.headers["Host"] == HOST and request.url.path == "/start":
+            return httpx.Response(302, headers={"Location": "/same-host"})
+        if request.url.path == "/same-host":
+            return httpx.Response(302, headers={"Location": "https://cdn.example.org/other"})
+        return html()
+
+    with make_fetcher(handler) as fetcher:
+        fetcher.get(f"https://{HOST}/start", headers={"x-api-key": "secret-value"})
+
+    assert seen == [
+        (HOST, "secret-value"),
+        (HOST, "secret-value"),
+        ("cdn.example.org", None),
+    ]
+
+
+@pytest.mark.parametrize("name", ["Host", "cookie", "User-Agent", "Accept-Encoding"])
+def test_reserved_headers_cannot_be_overridden(name):
+    with make_fetcher(lambda request: html()) as fetcher, pytest.raises(ValueError):
+        fetcher.get(f"https://{HOST}/", headers={name: "x"})
+
+
 def test_display_url_hides_query_and_credentials():
     assert (
         display_url("https://user:pw@api.example.org/path?key=secret#frag")

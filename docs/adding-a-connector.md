@@ -58,6 +58,27 @@ Rules:
   interpreted in the event or source timezone. Return a `date` for all-day events.
 - Raise `connectors.base.ConnectorError` when the content cannot be interpreted.
 
+### Configuration and credentials
+
+- Per-source settings live in `Source.config`, set with `add_source --config KEY=VALUE`. Override
+  `validate_config()` to accept and clean them; by default a connector takes no config.
+- Secrets never go in `config` or the database. Override `credentials_from_env(config, environ)`
+  to read them from environment variables. The result reaches `collect()` as
+  `source.credentials`, which is excluded from `repr()`. Limit which variable names a config may
+  reference (Luma only allows `LUMA_API_KEY` and `LUMA_API_KEY_*`), so a config can't point at
+  unrelated secrets.
+- Send credentials in headers: `fetcher.get(url, headers={...})`. `SafeFetcher` sends extra headers
+  only to the original host and drops them on redirects to a different host. Headers it manages
+  (`Host`, `Cookie`, `User-Agent`, `Accept-Encoding`, ...) cannot be overridden.
+- If registered URLs differ from the hosts you fetch (e.g. a calendar page vs an API host), set
+  `url_hosts` for registration matching and keep `allowed_hosts` to the hosts actually contacted.
+  `connectors/platforms/luma.py` is a complete example.
+
+### Privacy
+
+Only map fields that are meant to be public. Skip non-public events. Never map attendee data,
+meeting links or the contact details of submitters.
+
 ## 2. Test it without the network
 
 Tests must not make live requests; sockets are blocked during the test run. Use a fixture file and

@@ -13,12 +13,36 @@ SMS, Telegram and WhatsApp.
 | schema.org JSON-LD extraction | Implemented |
 | Normalisation, fingerprinting, change detection | Implemented |
 | Transactional, idempotent ingestion (`ingest_source`) | Implemented |
-| Luma connector | **Not yet implemented** (access method pending review) |
+| Luma connector (official API) | Implemented and tested against synthetic fixtures; not yet run against the live API |
 | mNotify SMS provider client | Implemented, not wired to any workflow; real sending disabled by default |
 | Scheduling, public API, subscribers, notification delivery | Not started (later phases) |
 
-No production connector ships yet, so `add_source` currently rejects every URL with
-`unsupported_source`. See [docs/adding-a-connector.md](docs/adding-a-connector.md).
+To add another platform, see [docs/adding-a-connector.md](docs/adding-a-connector.md).
+
+## Luma calendars
+
+Event Bank reads Luma only through Luma's official API. It never scrapes luma.com pages: Luma's
+Terms of Use only allow access through its publicly supported interfaces. Requirements:
+
+- A Luma Plus subscription and a calendar API key from `luma.com/calendar/manage/api-keys`.
+  Each key is scoped to one calendar, and it **grants full access to that calendar**. Treat it like a
+  password, and use it only on calendars you are allowed to manage.
+- The key goes in an environment variable, never in the database: `LUMA_API_KEY`, or
+  `LUMA_API_KEY_<NAME>` when you have several calendars.
+
+```bash
+# .env
+LUMA_API_KEY_ACCRA=...
+
+docker compose exec backend python manage.py add_source https://luma.com/<calendar-slug> \
+    --config api_key_env=LUMA_API_KEY_ACCRA --approve
+```
+
+Each run checks that the key belongs to the registered calendar and fetches upcoming events
+(from 24 hours ago onwards). Only `public` events are stored. When a host shows the address
+only to guests, only the city is kept. Meeting links and submitter details are never stored.
+`--config include_listed_events=true` also includes events listed on the calendar but managed
+elsewhere; for those, Luma itself limits the location to city level.
 
 ## Stack
 

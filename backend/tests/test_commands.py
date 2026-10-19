@@ -53,6 +53,27 @@ def test_add_source_reports_validation_errors(example_connector, mocked_network)
         call_command("add_source", "http://events.example.org/calendar")
     with pytest.raises(CommandError, match="ip_literal_not_allowed"):
         call_command("add_source", "https://169.254.169.254/")
+    with pytest.raises(CommandError, match="invalid_config: expected KEY=VALUE"):
+        call_command("add_source", EXAMPLE_SOURCE_URL, "--config", "novalue")
+    with pytest.raises(CommandError, match="invalid_config: Example"):
+        call_command("add_source", EXAMPLE_SOURCE_URL, "--config", "colour=blue")
+
+
+def test_add_source_passes_config_to_luma(mocked_network, monkeypatch):
+    monkeypatch.setenv("LUMA_API_KEY_ACCRA", "luma-test-key-0000000000")
+    out = StringIO()
+    call_command(
+        "add_source",
+        "https://lu.ma/example-tech",
+        "--config",
+        "api_key_env=LUMA_API_KEY_ACCRA",
+        "--config",
+        "include_listed_events=false",
+        stdout=out,
+    )
+    source = Source.objects.get()
+    assert source.connector == "luma"
+    assert source.config == {"api_key_env": "LUMA_API_KEY_ACCRA", "include_listed_events": False}
 
 
 def test_ingest_source_errors(example_connector, mocked_network):

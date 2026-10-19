@@ -1,10 +1,13 @@
+import os
+from collections.abc import Mapping
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from apps.sources.models import Source
-from connectors.base import Connector
+from connectors.base import Connector, ConnectorError
 from connectors.http import FetchPolicy, Resolver, UnsafeURLError, check_url, system_resolver
 from connectors.http import validate_url as validate_fetch_target
 from connectors.registry import UnsupportedSourceError, match_connector
@@ -16,9 +19,9 @@ class SourceRegistrationError(Exception):
         self.code = code
 
 
-def fetch_policy_for(connector_cls: type[Connector]) -> FetchPolicy:
+def fetch_policy_for(connector_cls: type[Connector], hosts: frozenset[str] | None = None):
     return FetchPolicy(
-        allowed_hosts=frozenset(connector_cls.allowed_hosts),
+        allowed_hosts=frozenset(hosts if hosts is not None else connector_cls.allowed_hosts),
         max_redirects=settings.CONNECTOR_MAX_REDIRECTS,
         max_response_bytes=settings.CONNECTOR_MAX_RESPONSE_BYTES,
         connect_timeout=settings.CONNECTOR_CONNECT_TIMEOUT_SECONDS,
@@ -33,10 +36,12 @@ def register_source(
     *,
     name: str = "",
     timezone: str | None = None,
+    config: Mapping[str, Any] | None = None,
     submitted_by=None,
     approve: bool = False,
     reviewer=None,
     resolver: Resolver = system_resolver,
+    environ: Mapping[str, str] = os.environ,
 ) -> Source:
     """Validate a source URL and store it. Sources start pending unless `approve` is set."""
     url = url.strip()
@@ -50,8 +55,18 @@ def register_source(
 
     canonical_url = connector_cls.canonicalize_url(url)
     try:
-        validate_fetch_target(canonical_url, fetch_policy_for(connector_cls), resolver=resolver)
+        validate_fetch_target(
+            canonical_url,
+            fetch_policy_for(connector_cls, connector_cls.source_url_hosts()),
+            resolver=resolver,
+        )
     except UnsafeURLError as exc:
+        raise SourceRegistrationError(exc.code, str(exc)) from None
+
+    try:
+        cleaned_config = connector_cls.validate_config(config or {})
+        connector_cls.credentials_from_env(cleaned_config, environ)
+    except ConnectorError as exc:
         raise SourceRegistrationError(exc.code, str(exc)) from None
 
     tz_name = timezone or settings.TIME_ZONE
@@ -67,6 +82,7 @@ def register_source(
                 connector=connector_cls.slug,
                 name=name,
                 timezone=tz_name,
+                config=cleaned_config,
                 submitted_by=submitted_by,
             )
     except IntegrityError:
