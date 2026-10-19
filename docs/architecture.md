@@ -1,0 +1,102 @@
+# Architecture
+
+Event Bank is a modular Django monolith backed by PostgreSQL. There is one codebase, one
+database, and (from Phase 2) one worker process running the same image. There is no message
+broker; background work will use PostgreSQL row locking.
+
+## Layout and dependency rules
+
+```
+backend/
+├── config/            Settings (environment-driven), URL routing
+├── connectors/        Pure Python. Connector contract, SafeFetcher, JSON-LD extraction, registry
+│   ├── base.py        RawEvent, SourceSpec, Connector, Fetcher protocol
+│   ├── http.py        SafeFetcher and URL/DNS validation
+│   ├── registry.py    Slug registry, URL matching, autodiscovery of connectors/platforms/
+│   ├── extract/       Reusable extractors (jsonld.py)
+│   └── platforms/     One module per supported platform (none shipped yet)
+├── pipeline/          Pure Python. normalize.py, fingerprint.py, diff.py
+├── apps/
+│   ├── common/        Health endpoint, DenyAll default permission, log redaction, phone numbers
+│   ├── sources/       Source model, register_source(), add_source command, admin review
+│   ├── ingestion/     SourceRun model, ingest_source() orchestration and command
+│   ├── events/        Event and EventRevision models, upsert_events()
+│   ├── subscriptions/ Placeholder for subscribers and consent (Phase 3)
+│   └── notifications/ providers/: provider contract, mNotify, console (dev)
+└── tests/             Mocked HTTP and DNS only; sockets are blocked during tests
+```
+
+Allowed imports point downwards only:
+
+- `connectors` and `pipeline` never import Django. `tests/test_layering.py` enforces this.
+- `ingestion` → `sources`, `events`, `connectors`, `pipeline`
+- `events` → `pipeline`
+- `notifications.providers` → `common`
+
+## Ingestion flow
+
+`ingest_source(source_id)` in `apps/ingestion/services.py`:
+
+1. Refuses sources that are not `approved`.
+2. Creates a `SourceRun` (status `running`) before any network I/O, so failures are always recorded.
+3. Builds a `FetchPolicy` from the connector's `allowed_hosts` and settings, and gives the connector
+   a `SafeFetcher`. Connectors never open connections themselves.
+4. Calls `connector.collect()`, capped at 500 events.
+5. Normalises with `pipeline.normalize_events()`: cleans text, converts times to UTC (naive times
+   use the event's timezone, then the source's), canonicalises URLs (only http/https survive),
+   drops invalid events and duplicate external IDs with a recorded reason.
+6. Opens one database transaction, locks the `Source` row (serialising concurrent runs of the same
+   source), and calls `upsert_events()`.
+7. Marks the run `succeeded` with counts, or `failed` with an error code and a redacted message.
+
+Network I/O happens outside the transaction. Any exception rolls back all event changes for that run.
+A run with zero valid events fails with `no_events`, because that usually means the page format changed.
+
+## Deduplication and change detection
+
+- An event is identified by `(source, external_id)`, enforced by a unique constraint. Connectors
+  must supply an `external_id` that is stable across fetches.
+- `pipeline.normalize.to_snapshot()` serialises the tracked fields. `fingerprint()` is a SHA-256
+  over that snapshot; `diff_snapshots()` lists the changed fields.
+- New event: `Event` row plus an `EventRevision` of kind `created` (significant).
+- Unchanged: only `last_seen_at` is updated. No revision.
+- Changed: fields updated, `last_changed_at` set, and an `EventRevision` of kind `updated` stores
+  the changed field names with before/after values.
+- Significant fields: `starts_at`, `ends_at`, `is_all_day`, `venue_name`, `address`,
+  `attendance_mode`, `status`. Title, description, URL and image edits are recorded but not significant.
+- Events missing from a fetch are never deleted or modified.
+- Cross-source deduplication (the same event listed on two platforms) is not implemented.
+
+## Source lifecycle
+
+`pending` → `approved` / `rejected`, and `approved` → `paused`. `add_source` creates pending sources
+unless `--approve` is passed by the operator. The admin cannot create sources directly, so every
+source passes through `register_source()` validation. Events and runs are read-only in the admin.
+
+## Notification providers
+
+`apps/notifications/providers/base.py` defines `NotificationProvider.send()` returning a
+`SendResult` with a `DeliveryOutcome`:
+
+| Outcome | Meaning | Automatic retry |
+|---|---|---|
+| `accepted` | Provider accepted the message | n/a |
+| `rejected` | Provider refused it; retrying will not help | No |
+| `retryable` | Request never reached the provider (connect failure) or was rate-limited | Allowed |
+| `unknown` | It may have been sent (timeout after sending, 5xx, unparseable reply) | **Never** |
+
+`MNotifyProvider` normalises recipients to Ghana E.164 numbers, sends the national format that
+mNotify documents, and classifies responses as above. It refuses to construct a real HTTP client
+unless `SMS_SENDING_ENABLED=true`. No workflow sends notifications yet, and no retry logic exists.
+Telegram and WhatsApp will be separate provider modules.
+
+## API
+
+Only `GET /api/health/` exists. DRF's default permission is `DenyAll`, so every future view must
+declare `permission_classes`; `tests/test_common.py` fails if one does not. Anonymous and
+authenticated requests are throttled by default.
+
+## Not yet built
+
+Scheduling worker (Phase 2), public API (Phase 2), subscribers and consent (Phase 3), notification
+outbox, delivery tracking and retries (Phase 4), Telegram and WhatsApp (Phase 5+).

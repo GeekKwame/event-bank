@@ -1,0 +1,36 @@
+<!doctype html>
+<!--
+  Synthetic fixture written by hand for Event Bank tests.
+  It follows the public schema.org Event vocabulary and is not copied from any real website.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Example events</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": ["Event", "SocialEvent"],
+        "@id": "https://events.example.org/e/launch#event",
+        "name": "  Product   Launch &amp; Mixer ",
+        "url": "https://events.example.org/e/launch",
+        "startDate": "2026-11-20T18:00:00",
+        "endDate": "2026-11-20T21:00:00",
+        "eventStatus": "https://schema.org/EventCancelled",
+        "location": [
+          {"@type": "Place", "name": "Example Rooftop", "address": "5 Sample Road, Accra"},
+          {"@type": "VirtualLocation", "url": "https://stream.example.org/launch"}
+        ],
+        "organizer": [{"@type": "Organization", "name": "Example Startup"}],
+        "image": [{"@type": "ImageObject", "url": "https://events.example.org/img/launch.png"}],
+        "description": "Line one.\r\n\r\n\r\n\r\nLine two."
+      }
+    </script>
+    <script type="application/ld+json">
+      [{"@type": "WebSite", "name": "Example"}, {"@type": "schema:Hackathon", "@id": "hack-1", "name": "Example Hackathon", "startDate": "2026-12-05"}]
+    </script>
+    <script type="application/ld+json">{ this is not json }</script>
+    <script type="application/json">{"@type": "Event", "name": "Not JSON-LD, must be ignored"}</script>
+  </head>
+  <body><h1>Example events</h1></body>
+</html>

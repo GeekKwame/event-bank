@@ -1,0 +1,98 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: event_bank
+          POSTGRES_USER: event_bank
+          POSTGRES_PASSWORD: event_bank
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U event_bank"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Not a secret: CI runs with DEBUG off, which requires a 50+ character key.
+      DJANGO_SECRET_KEY: ci-only-insecure-key-0000000000000000000000000000000000000000
+      POSTGRES_DB: event_bank
+      POSTGRES_USER: event_bank
+      POSTGRES_PASSWORD: event_bank
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: |
+          uv run --frozen ruff check .
+          uv run --frozen ruff format --check .
+
+      - name: Check for missing migrations
+        run: uv run --frozen python manage.py makemigrations --check --dry-run
+
+      - name: Test
+        run: uv run --frozen pytest
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Audit locked dependencies for known vulnerabilities
+        run: |
+          uv export --frozen --format requirements-txt --no-emit-project > "$RUNNER_TEMP/requirements.txt"
+          uv run --frozen pip-audit -r "$RUNNER_TEMP/requirements.txt" --disable-pip --require-hashes --strict
