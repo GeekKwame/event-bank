@@ -1,8 +1,12 @@
 # Event Bank
 
-A platform that collects technology events from public sources, normalises them, detects new
-and changed events, and (in later phases) notifies subscribers by SMS, Telegram and WhatsApp.
-The source code is public, but the project currently has no license (see [License](#license)).
+A self-hostable, AGPL-3.0-only platform that collects technology events from supported public
+sources, normalises them, detects new and changed events, and queues alerts for opted-in
+Telegram subscribers. WhatsApp and SMS delivery workflows are planned extensions.
+
+Users submit a source URL, an operator reviews it, and platform connectors extract event links,
+dates and locations. Contributors can add new connectors without changing the ingestion pipeline.
+The software needs no paid scraping or AI service; external messaging and hosting can have costs.
 
 ## Status
 
@@ -13,12 +17,42 @@ The source code is public, but the project currently has no license (see [Licens
 | schema.org JSON-LD extraction | Implemented |
 | Normalisation, fingerprinting, change detection | Implemented |
 | Transactional, idempotent ingestion (`ingest_source`) | Implemented |
+| confs.tech public JSON connector (free) | Implemented; live fetch and normalisation verified |
+| AgentConfs public JSON connector (free) | Implemented against synthetic fixtures; direct live access returned HTTP 403 |
 | Luma iCal feed connector (free) | Implemented and tested against synthetic fixtures; not yet run against live feeds |
 | Luma connector (official API, Luma Plus) | Implemented and tested against synthetic fixtures; not yet run against the live API |
-| mNotify SMS provider client | Implemented, not wired to any workflow; real sending disabled by default |
-| Scheduling, public API, subscribers, notification delivery | Not started (later phases) |
+| Source submission and public events/platforms API | Implemented; submissions require login or a private Telegram chat |
+| Telegram follows, opt-in and `/stop` | Implemented; tested with mocked Telegram responses |
+| Transactional alert outbox and bounded retries | Implemented; uncertain sends are never retried |
+| PostgreSQL scheduling/delivery worker | Implemented; scheduling and real Telegram sending disabled by default |
+| mNotify SMS provider client | Implemented, not wired to a subscriber workflow; real sending disabled by default |
+| WhatsApp, SMS subscriber workflow, frontend | Not implemented |
 
 To add another platform, see [docs/adding-a-connector.md](docs/adding-a-connector.md).
+
+For the complete URL → event → Telegram setup, see [running the alert pipeline](docs/alert-pipeline.md).
+No real Telegram messages have been sent during development verification.
+
+## Free JSON event sources
+
+No API key or paid subscription is needed for these connectors. Start with one confs.tech
+topic/year file:
+
+```bash
+docker compose exec backend python manage.py add_source \
+    https://raw.githubusercontent.com/tech-conferences/conference-data/main/conferences/2026/python.json \
+    --name "confs.tech Python 2026" --timezone UTC --approve
+# Use the source ID printed above:
+docker compose exec backend python manage.py ingest_source <source-id>
+```
+
+AgentConfs can be registered with `add_source https://agentconfs.com/data/events.json --approve`.
+Direct requests from the development environment returned HTTP 403; its live ingestion is not
+verified. Neither connector bypasses access restrictions. Both support `--config country=Ghana`
+for an exact, case-insensitive country filter; local coverage is not guaranteed.
+
+See [free event sources](docs/free-event-sources.md) for attribution requirements, date/identity
+limitations, and how to select confs.tech topics. Scheduling is opt-in through `run_worker`.
 
 ## Luma calendars
 
@@ -121,16 +155,15 @@ After changing dependencies, run `uv lock` in `backend/` and commit the lock fil
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Running the alert pipeline](docs/alert-pipeline.md)
 - [Adding a connector](docs/adding-a-connector.md)
 - [Security policy and threat model](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License
 
-Event Bank currently has no license. The source code is publicly visible, but without a license
-no one else is granted permission to use, copy, modify, host or distribute it, so it is not open
-source. A project license does not govern which third-party sites Event Bank may access; their
-own terms do.
-
-Commits up to and including `2b23819` were published with the GNU Affero General Public License
-v3.0 only (`AGPL-3.0-only`), and copies obtained from those commits carry that license.
+Event Bank is licensed under the GNU Affero General Public License version 3 only
+(`AGPL-3.0-only`); see [LICENSE](LICENSE). You may use, modify, host and redistribute it under
+that license. Operators of modified versions must offer their corresponding source to users
+interacting with those versions over a network. Third-party data retains its own license, and
+platform access and messaging charges are governed by the respective providers.

@@ -58,17 +58,26 @@ Source URLs come from users and are fetched by the server. Controls in `backend/
 
 ### Notification abuse
 
-- Real SMS sending is off unless `SMS_SENDING_ENABLED=true`.
+- Real SMS sending is off unless `SMS_SENDING_ENABLED=true`; there is no SMS subscriber workflow yet.
+- Real Telegram sending is off unless `TELEGRAM_SENDING_ENABLED=true`. Only private chats are
+  supported. `/follow` records consent; `/stop` removes follows and cancels queued event alerts.
+  Incoming commands are obtained from Telegram's authenticated API; chat IDs cannot be supplied
+  through a public subscription endpoint. The bot token is redacted even when embedded in a URL.
+- One worker per database paces Telegram messages at 1.1 seconds each with paid broadcasts disabled.
 - Phone numbers are validated as Ghana mobile numbers (E.164 `+233…`) before any provider call.
 - Delivery outcomes that may have been sent (`unknown`) are never retried automatically, to avoid
   duplicate messages.
 - Event text is cleaned and length-limited, and only http(s) links survive normalisation.
-- Not yet implemented (Phase 3–4, required before live sending): double opt-in consent, STOP/opt-out,
-  per-recipient and global sending caps, and verification-code rate limits.
+- Before enabling SMS/WhatsApp workflows: implement channel-specific destination verification,
+  opt-out, sending/cost caps and verification-code rate limits. Telegram consent does not grant
+  permission to contact someone on another channel.
 
 ### API
 
-- DRF denies any view that does not declare `permission_classes`. Only `/api/health/` is public.
+- DRF denies any view that does not declare `permission_classes`. Health, approved sources,
+  supported platforms and upcoming events are public. Source config and subscribers are private.
+- Source submission requires session authentication/CSRF or a Telegram private-chat command.
+  All submissions remain pending until reviewed, with a five-source daily limit per account/chat.
 - Anonymous and authenticated requests are throttled.
 - With `DEBUG` off: HTTPS redirect, HSTS (1 hour by default, configurable), and secure cookies.
 

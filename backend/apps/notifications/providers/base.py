@@ -34,6 +34,7 @@ class SendResult:
     accepted_recipients: tuple[str, ...] = ()
     error_code: str | None = None
     error_message: str | None = None
+    retry_after: int | None = None
     raw: Mapping[str, Any] = field(default_factory=dict)
 
 

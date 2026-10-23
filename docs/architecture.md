@@ -1,8 +1,8 @@
 # Architecture
 
 Event Bank is a modular Django monolith backed by PostgreSQL. There is one codebase, one
-database, and (from Phase 2) one worker process running the same image. There is no message
-broker; background work will use PostgreSQL row locking.
+database, and one worker process running the same image. There is no message broker; source
+claims and the notification outbox use PostgreSQL locking.
 
 ## Layout and dependency rules
 
@@ -21,16 +21,18 @@ backend/
 │   ├── sources/       Source model, register_source(), add_source command, admin review
 │   ├── ingestion/     SourceRun model, ingest_source() orchestration and command
 │   ├── events/        Event and EventRevision models, upsert_events()
-│   ├── subscriptions/ Placeholder for subscribers and consent (Phase 3)
-│   └── notifications/ providers/: provider contract, mNotify, console (dev)
+│   ├── subscriptions/ Telegram subscribers, source follows, opt-in/stop commands, polling cursor
+│   └── notifications/ Transactional outbox, delivery service, Telegram/mNotify/console providers
 └── tests/             Mocked HTTP and DNS only; sockets are blocked during tests
 ```
 
 Allowed imports point downwards only:
 
 - `connectors` and `pipeline` never import Django. `tests/test_layering.py` enforces this.
-- `ingestion` → `sources`, `events`, `connectors`, `pipeline`
+- `ingestion` → `sources`, `events`, `notifications`, `connectors`, `pipeline`
 - `events` → `pipeline`
+- `notifications.services` → `events`, `sources`, `subscriptions.models`
+- `subscriptions.telegram` → `sources`, `notifications.models`
 - `notifications.providers` → `common`
 
 ## Ingestion flow
@@ -38,7 +40,8 @@ Allowed imports point downwards only:
 `ingest_source(source_id)` in `apps/ingestion/services.py`:
 
 1. Refuses sources that are not `approved`.
-2. Creates a `SourceRun` (status `running`) before any network I/O, so failures are always recorded.
+2. Locks the source briefly and claims a `SourceRun` before fetching. A running claim younger than
+   15 minutes rejects overlapping attempts. Older claims are expired and may be replaced.
 3. Validates the source's `config` and resolves its credentials from environment variables
    (`Connector.credentials_from_env`). Secrets are never stored in the database.
 4. Builds a `FetchPolicy` from the connector's `allowed_hosts` and settings, and gives the connector
@@ -47,8 +50,9 @@ Allowed imports point downwards only:
 6. Normalises with `pipeline.normalize_events()`: cleans text, converts times to UTC (naive times
    use the event's timezone, then the source's), canonicalises URLs (only http/https survive),
    drops invalid events and duplicate external IDs with a recorded reason.
-7. Opens one database transaction, locks the `Source` row (serialising concurrent runs of the same
-   source), and calls `upsert_events()`.
+7. Opens one database transaction, locks the `Source` row, rechecks approval and run ownership,
+   calls `upsert_events()`, and queues alerts for significant revisions and active source follows.
+   An expired run cannot overwrite a newer run even if its network request eventually finishes.
 8. Marks the run `succeeded` with counts, or `failed` with an error code and a redacted message.
 
 Network I/O happens outside the transaction. Any exception rolls back all event changes for that run.
@@ -68,6 +72,13 @@ A run with zero valid events fails with `no_events`, because that usually means 
   `attendance_mode`, `status`. Title, description, URL and image edits are recorded but not significant.
 - Events missing from a fetch are never deleted or modified.
 - Cross-source deduplication (the same event listed on two platforms) is not implemented.
+
+## Free JSON dataset connectors
+
+`agentconfs` and `confstech` use the same ingestion flow. Their descriptions preserve source
+attribution/license notices through normalisation and storage. See
+[free event sources](free-event-sources.md) for supported URLs, filtering, verification and
+identity/date limitations.
 
 ## Luma iCal feed connector
 
@@ -130,16 +141,36 @@ source passes through `register_source()` validation. Events and runs are read-o
 
 `MNotifyProvider` normalises recipients to Ghana E.164 numbers, sends the national format that
 mNotify documents, and classifies responses as above. It refuses to construct a real HTTP client
-unless `SMS_SENDING_ENABLED=true`. No workflow sends notifications yet, and no retry logic exists.
-Telegram and WhatsApp will be separate provider modules.
+unless `SMS_SENDING_ENABLED=true`. It is not yet wired to subscriptions. Telegram has its own
+provider using the official Bot API, private chat IDs and plain text, with paid broadcasts disabled.
+
+The ingestion transaction creates a unique delivery per subscriber/revision. No HTTP send happens
+inside that transaction. A worker claims pending rows with `select_for_update(skip_locked=True)`,
+checks opt-in/follow/source status again, commits the claim, and sends. Only explicit retryable
+outcomes are retried (three attempts maximum, exponential delay and provider `retry_after`).
+Claims abandoned for five minutes become `unknown`; they are never blindly replayed. Accepted
+means provider acceptance, not proof of reading or final delivery. This trades possible missed
+messages after crashes for avoiding duplicate sends under uncertainty.
+
+`run_worker` takes a PostgreSQL advisory lock to allow one worker per database. It polls Telegram
+commands, optionally imports due approved sources, then processes up to 20 deliveries per cycle
+with 1.1 seconds between sends. Bot offsets, command changes and replies commit together. Duplicate
+updates do not repeat mutations or acknowledgements. Only private-chat users can follow sources;
+`/start` alone does not consent to alerts. `/stop` removes follows and cancels pending event alerts.
+An already in-flight HTTP request cannot be recalled. See [setup](alert-pipeline.md).
 
 ## API
 
-Only `GET /api/health/` exists. DRF's default permission is `DenyAll`, so every future view must
-declare `permission_classes`; `tests/test_common.py` fails if one does not. Anonymous and
-authenticated requests are throttled by default.
+`GET /api/health/`, `/api/events/`, `/api/sources/` and `/api/platforms/` are public. Events and
+sources expose only approved sources; source config and subscriber details are not returned.
+Events support location and attendance-mode filters and retain attribution descriptions.
+`POST /api/sources/submit/` requires Django session authentication and CSRF protection. All
+submissions are pending, with a five-source daily limit per account. Telegram has a separate
+five-request daily limit per private chat. DRF's default permission is `DenyAll`; every view
+must explicitly declare its permissions. Requests are throttled by default.
 
 ## Not yet built
 
-Scheduling worker (Phase 2), public API (Phase 2), subscribers and consent (Phase 3), notification
-outbox, delivery tracking and retries (Phase 4), Telegram and WhatsApp (Phase 5+).
+Frontend, WhatsApp adapter/templates/opt-in, SMS subscriber verification and STOP routing,
+cross-source deduplication, generalized scraping, and reliable cancellation reconciliation for
+sources that silently remove events. The current worker is intended for small deployments.

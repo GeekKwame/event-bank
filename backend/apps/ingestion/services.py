@@ -2,6 +2,7 @@ import itertools
 import logging
 import os
 from collections.abc import Callable, Mapping
+from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -9,6 +10,7 @@ from django.utils import timezone
 from apps.common.redaction import configured_secrets, redact
 from apps.events.services import upsert_events
 from apps.ingestion.models import SourceRun
+from apps.notifications.services import enqueue_run_alerts
 from apps.sources.models import Source
 from apps.sources.services import fetch_policy_for
 from connectors.base import ConnectorError, Fetcher, SourceSpec
@@ -20,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 MAX_EVENTS_PER_RUN = 500
 MAX_SKIPPED_DETAILS = 50
+RUN_LEASE = timedelta(minutes=15)
 
 FetcherFactory = Callable[[FetchPolicy], Fetcher]
 
@@ -57,13 +60,18 @@ def ingest_source(
     Network I/O happens before the transaction opens. If anything fails, the
     run is marked failed and no event rows are changed.
     """
-    source = Source.objects.get(pk=source_id)
-    if not source.is_approved:
-        raise SourceNotApprovedError(
-            "source_not_approved", f"Source #{source.pk} is {source.status}, not approved"
-        )
-
-    run = SourceRun.objects.create(source=source, trigger=trigger)
+    with transaction.atomic():
+        source = Source.objects.select_for_update().get(pk=source_id)
+        if not source.is_approved:
+            raise SourceNotApprovedError(
+                "source_not_approved", f"Source #{source.pk} is {source.status}, not approved"
+            )
+        now = timezone.now()
+        running = SourceRun.objects.filter(source=source, status=SourceRun.Status.RUNNING)
+        if running.filter(started_at__gte=now - RUN_LEASE).exists():
+            raise IngestionError("source_busy", "This source already has an ingestion in progress")
+        running.update(status=SourceRun.Status.FAILED, finished_at=now, error_code="lease_expired")
+        run = SourceRun.objects.create(source=source, trigger=trigger)
     try:
         connector_cls = get_connector(source.connector)
         config = connector_cls.validate_config(source.config)
@@ -94,8 +102,15 @@ def ingest_source(
             )
 
         with transaction.atomic():
-            Source.objects.select_for_update().get(pk=source.pk)
+            current_source = Source.objects.select_for_update().get(pk=source.pk)
+            if not current_source.is_approved:
+                raise SourceNotApprovedError(
+                    "source_not_approved", "Source was paused during fetch"
+                )
+            if not SourceRun.objects.filter(pk=run.pk, status=SourceRun.Status.RUNNING).exists():
+                raise IngestionError("run_superseded", "A newer run replaced this expired run")
             upserted = upsert_events(source, result.events, now=timezone.now(), source_run=run)
+            enqueue_run_alerts(run)
             run.status = SourceRun.Status.SUCCEEDED
             run.finished_at = timezone.now()
             run.events_found = len(raw_events)

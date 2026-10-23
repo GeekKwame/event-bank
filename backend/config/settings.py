@@ -170,3 +170,9 @@ CONNECTOR_MAX_REDIRECTS = int(os.environ.get("CONNECTOR_MAX_REDIRECTS", "3"))
 SMS_SENDING_ENABLED = env_bool("SMS_SENDING_ENABLED")
 MNOTIFY_API_KEY = os.environ.get("MNOTIFY_API_KEY", "")
 MNOTIFY_SENDER_ID = os.environ.get("MNOTIFY_SENDER_ID", "")
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_SENDING_ENABLED = env_bool("TELEGRAM_SENDING_ENABLED")
+# Opt in to automatic ingestion explicitly. Manual ingest_source always remains available.
+INGESTION_SCHEDULING_ENABLED = env_bool("INGESTION_SCHEDULING_ENABLED")
+INGESTION_INTERVAL_SECONDS = max(3600, int(os.environ.get("INGESTION_INTERVAL_SECONDS", "3600")))
