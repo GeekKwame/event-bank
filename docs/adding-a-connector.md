@@ -70,6 +70,8 @@ Rules:
 - Send credentials in headers: `fetcher.get(url, headers={...})`. `SafeFetcher` sends extra headers
   only to the original host and drops them on redirects to a different host. Headers it manages
   (`Host`, `Cookie`, `User-Agent`, `Accept-Encoding`, ...) cannot be overridden.
+- The fetcher accepts HTML and JSON responses by default. Set `accepted_content_types` for other
+  formats (the Luma iCal connector uses `frozenset({"text/calendar"})`).
 - If registered URLs differ from the hosts you fetch (e.g. a calendar page vs an API host), set
   `url_hosts` for registration matching and keep `allowed_hosts` to the hosts actually contacted.
   `connectors/platforms/luma.py` is a complete example.

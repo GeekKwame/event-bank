@@ -14,7 +14,7 @@ backend/
 │   ├── http.py        SafeFetcher and URL/DNS validation
 │   ├── registry.py    Slug registry, URL matching, autodiscovery of connectors/platforms/
 │   ├── extract/       Reusable extractors (jsonld.py)
-│   └── platforms/     One module per supported platform (luma.py: Luma official API)
+│   └── platforms/     One module per platform (luma_ical.py: free iCal feeds; luma.py: official API)
 ├── pipeline/          Pure Python. normalize.py, fingerprint.py, diff.py
 ├── apps/
 │   ├── common/        Health endpoint, DenyAll default permission, log redaction, phone numbers
@@ -69,9 +69,25 @@ A run with zero valid events fails with `no_events`, because that usually means 
 - Events missing from a fetch are never deleted or modified.
 - Cross-source deduplication (the same event listed on two platforms) is not implemented.
 
-## Luma connector
+## Luma iCal feed connector
 
-`connectors/platforms/luma.py` uses Luma's official API only:
+`connectors/platforms/luma_ical.py` reads Luma's free iCal subscription feeds, parsed with the
+`icalendar` library:
+
+- Registered URLs are the feed links themselves: `https://api.lu.ma/ics/get?entity=calendar&id=cal-…`
+  or `entity=discover&id=discplace-…` (also on `api2.luma.com`). Any other path, entity or extra
+  query parameter is rejected, which keeps personal token-bearing feeds out. Only those two hosts
+  may be fetched, and responses must be `text/calendar`.
+- Each `VEVENT` becomes a `RawEvent`. The external ID is the `UID` (plus `RECURRENCE-ID` when
+  present), and `STATUS:CANCELLED` maps to `cancelled`. The event URL is the `URL` property, or else
+  the first luma.com link in the description or location.
+- `CLASS:PRIVATE`/`CONFIDENTIAL` events and events that ended more than 24 hours ago are skipped.
+  `ORGANIZER` and `ATTENDEE` are never read, and a location that is a link is not stored.
+- `RRULE` recurrences are not expanded.
+
+## Luma API connector
+
+`connectors/platforms/luma.py` uses Luma's official API (Luma Plus):
 
 - Registered URLs are calendar pages (`https://luma.com/<slug>`; `lu.ma` and `www.luma.com` are
   canonicalised to `luma.com`). They identify the calendar and are never fetched. The fetcher may

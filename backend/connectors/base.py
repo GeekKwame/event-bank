@@ -96,6 +96,9 @@ class Connector(ABC):
     url_hosts: ClassVar[frozenset[str] | None] = None
     """Hosts accepted in registered source URLs. Defaults to `allowed_hosts`."""
 
+    accepted_content_types: ClassVar[frozenset[str] | None] = None
+    """Response MIME types the fetcher accepts. Defaults to HTML and JSON types."""
+
     @classmethod
     def source_url_hosts(cls) -> frozenset[str]:
         return cls.url_hosts if cls.url_hosts is not None else cls.allowed_hosts

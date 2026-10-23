@@ -1,8 +1,8 @@
 # Event Bank
 
-An open-source, self-hostable platform that collects technology events from public sources,
-normalises them, detects new and changed events, and (in later phases) notifies subscribers by
-SMS, Telegram and WhatsApp.
+A platform that collects technology events from public sources, normalises them, detects new
+and changed events, and (in later phases) notifies subscribers by SMS, Telegram and WhatsApp.
+The source code is public, but the project currently has no license (see [License](#license)).
 
 ## Status
 
@@ -13,7 +13,8 @@ SMS, Telegram and WhatsApp.
 | schema.org JSON-LD extraction | Implemented |
 | Normalisation, fingerprinting, change detection | Implemented |
 | Transactional, idempotent ingestion (`ingest_source`) | Implemented |
-| Luma connector (official API) | Implemented and tested against synthetic fixtures; not yet run against the live API |
+| Luma iCal feed connector (free) | Implemented and tested against synthetic fixtures; not yet run against live feeds |
+| Luma connector (official API, Luma Plus) | Implemented and tested against synthetic fixtures; not yet run against the live API |
 | mNotify SMS provider client | Implemented, not wired to any workflow; real sending disabled by default |
 | Scheduling, public API, subscribers, notification delivery | Not started (later phases) |
 
@@ -21,8 +22,39 @@ To add another platform, see [docs/adding-a-connector.md](docs/adding-a-connecto
 
 ## Luma calendars
 
-Event Bank reads Luma only through Luma's official API. It never scrapes luma.com pages: Luma's
-Terms of Use only allow access through its publicly supported interfaces. Requirements:
+Event Bank never scrapes luma.com pages: Luma's Terms of Use only allow access through its
+publicly supported interfaces. It supports two of them.
+
+**Do not ingest live Luma data yet.** Luma has not yet confirmed in writing that storing events and
+sending notifications about them is permitted. Neither connector has been run against Luma.
+
+### Free: iCal subscription feeds
+
+Luma offers free iCal feeds for any public calendar and for Discover city pages
+([iCal Syncing](https://help.luma.com/p/ical-syncing)), with no API key or Luma Plus needed. On the
+calendar or city page, click "Add iCal Subscription", copy the link, and change `webcal://` to
+`https://`:
+
+```bash
+docker compose exec backend python manage.py add_source \
+    "https://api.lu.ma/ics/get?entity=calendar&id=cal-..." --approve
+```
+
+- Only `entity=calendar` and `entity=discover` (city) feeds are accepted. Personal feeds
+  (`entity=user`) carry a private token and are rejected, as are links with any other parameters.
+- Accepted hosts are `api.lu.ma` and `api2.luma.com`. These are the hosts Luma's subscription links
+  have been observed to use; Luma does not document them. If your link uses another host, report it
+  rather than editing the allowlist casually.
+- Events ending more than 24 hours ago are skipped. `PRIVATE`/`CONFIDENTIAL` events are skipped.
+  Organisers and attendees are never read. A location that is a link (such as a meeting URL) is not
+  stored. Feed cancellations (`STATUS:CANCELLED`) are detected as significant changes.
+- Recurring events are not expanded: only each event's own date is stored.
+- Calendar apps poll these feeds every 15 minutes to 24 hours; Event Bank should poll no more than
+  hourly once scheduling exists.
+
+### Luma Plus: official API
+
+Requirements:
 
 - A Luma Plus subscription and a calendar API key from `luma.com/calendar/manage/api-keys`.
   Each key is scoped to one calendar, and it **grants full access to that calendar**. Treat it like a
@@ -46,8 +78,6 @@ organiser.
 
 Only events the calendar itself manages are collected. Events listed on the calendar but managed
 by other hosts are excluded until Luma confirms in writing that redistributing them is permitted.
-Event Bank has not yet been run against the live Luma API: do not run `ingest_source` on a Luma
-source until Luma has confirmed that your intended use is permitted.
 
 ## Stack
 
@@ -97,6 +127,10 @@ After changing dependencies, run `uv lock` in `backend/` and commit the lock fil
 
 ## License
 
-Event Bank is licensed under the GNU Affero General Public License v3.0 only
-(SPDX: `AGPL-3.0-only`); see [LICENSE](LICENSE). If you run a modified version as a network
-service, you must offer its source code to that service's users.
+Event Bank currently has no license. The source code is publicly visible, but without a license
+no one else is granted permission to use, copy, modify, host or distribute it, so it is not open
+source. A project license does not govern which third-party sites Event Bank may access; their
+own terms do.
+
+Commits up to and including `2b23819` were published with the GNU Affero General Public License
+v3.0 only (`AGPL-3.0-only`), and copies obtained from those commits carry that license.

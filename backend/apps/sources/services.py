@@ -20,6 +20,7 @@ class SourceRegistrationError(Exception):
 
 
 def fetch_policy_for(connector_cls: type[Connector], hosts: frozenset[str] | None = None):
+    content_types = connector_cls.accepted_content_types
     return FetchPolicy(
         allowed_hosts=frozenset(hosts if hosts is not None else connector_cls.allowed_hosts),
         max_redirects=settings.CONNECTOR_MAX_REDIRECTS,
@@ -28,6 +29,7 @@ def fetch_policy_for(connector_cls: type[Connector], hosts: frozenset[str] | Non
         read_timeout=settings.CONNECTOR_READ_TIMEOUT_SECONDS,
         total_timeout=settings.CONNECTOR_TOTAL_TIMEOUT_SECONDS,
         user_agent=settings.CONNECTOR_USER_AGENT,
+        **({"accepted_content_types": frozenset(content_types)} if content_types else {}),
     )
 
 

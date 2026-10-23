@@ -1,0 +1,53 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Event Bank tests//Synthetic feed//EN
+X-COMMENT:Synthetic fixture written by hand for Event Bank tests (RFC 5545). Not copied from Luma.
+X-WR-CALNAME:Example Tech Community
+BEGIN:VEVENT
+UID:evt-synthetic1001@example.org
+DTSTAMP:20261001T090000Z
+DTSTART;TZID=Africa/Accra:20261114T160000
+DTEND;TZID=Africa/Accra:20261114T190000
+SUMMARY:Example Developer Meetup
+LOCATION:Example Innovation Hub\, 1 Example Street\, Accra
+DESCRIPTION:Get up-to-date information at: https://luma.com/example-ical-me
+ etup\n\nA day of talks and demos.
+ORGANIZER;CN=Example Person:mailto:person@example.org
+ATTENDEE;CN=Another Person:mailto:attendee@example.org
+END:VEVENT
+BEGIN:VEVENT
+UID:evt-synthetic1002@example.org
+DTSTAMP:20261001T090000Z
+DTSTART:20261202T173000Z
+DURATION:PT1H
+SUMMARY:Example Online Workshop
+LOCATION:https://zoom.example.org/j/0000000000
+URL:https://luma.com/example-ical-workshop
+END:VEVENT
+BEGIN:VEVENT
+UID:evt-synthetic1003@example.org
+DTSTAMP:20261001T090000Z
+DTSTART;VALUE=DATE:20261205
+DTEND;VALUE=DATE:20261207
+SUMMARY:Example Two-Day Hackathon
+LOCATION:Example Campus\, Kumasi
+URL:https://luma.com/example-ical-hackathon
+STATUS:CANCELLED
+END:VEVENT
+BEGIN:VEVENT
+UID:evt-synthetic1004@example.org
+DTSTAMP:20261001T090000Z
+DTSTART:20261120T100000Z
+SUMMARY:Example Private Planning Session
+URL:https://luma.com/example-ical-private
+CLASS:PRIVATE
+END:VEVENT
+BEGIN:VEVENT
+UID:evt-synthetic1005@example.org
+DTSTAMP:20261001T090000Z
+DTSTART:20260101T100000Z
+DTEND:20260101T120000Z
+SUMMARY:Example Event Long Past
+URL:https://luma.com/example-ical-past
+END:VEVENT
+END:VCALENDAR
