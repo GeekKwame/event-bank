@@ -16,6 +16,7 @@ MAX_EXTERNAL_ID_LENGTH = 255
 MAX_TITLE_LENGTH = 300
 MAX_TEXT_LENGTH = 300
 MAX_DESCRIPTION_LENGTH = 5000
+MAX_ATTRIBUTION_LENGTH = 500
 MAX_URL_LENGTH = 2000
 MIN_YEAR, MAX_YEAR = 2000, 2100
 
@@ -44,6 +45,7 @@ class NormalizedEvent:
     status: str
     organizer_name: str
     image_url: str
+    attribution: str = ""
 
 
 TRACKED_FIELDS = tuple(f.name for f in fields(NormalizedEvent) if f.name != "external_id")
@@ -185,6 +187,7 @@ def normalize_event(raw: RawEvent, *, default_timezone: str) -> NormalizedEvent:
         status=status,
         organizer_name=clean_line(raw.organizer_name),
         image_url=canonicalize_url(raw.image_url),
+        attribution=clean_line(raw.attribution, MAX_ATTRIBUTION_LENGTH),
     )
 
 
@@ -195,6 +198,10 @@ def normalize_events(
     skipped: list[SkippedEvent] = []
     seen: set[str] = set()
     for raw in raw_events:
+        if raw.skip_reason:
+            reason = clean_line(raw.skip_reason, 64) or "invalid_row"
+            skipped.append(SkippedEvent(external_id=str(raw.external_id)[:100], reason=reason))
+            continue
         try:
             event = normalize_event(raw, default_timezone=default_timezone)
         except NormalizationError as exc:

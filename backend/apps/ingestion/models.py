@@ -12,6 +12,7 @@ class SourceRun(models.Model):
     class Trigger(models.TextChoices):
         MANUAL = "manual"
         SCHEDULED = "scheduled"
+        IMPORT = "import"
 
     source = models.ForeignKey("sources.Source", on_delete=models.CASCADE, related_name="runs")
     status = models.CharField(

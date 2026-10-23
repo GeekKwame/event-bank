@@ -51,6 +51,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Serves collected static files (the admin's CSS/JS) when DEBUG is off.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -135,6 +137,20 @@ REST_FRAMEWORK = {
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
+    # Number of trusted reverse proxies in front of the app; throttling then uses the client IP
+    # from X-Forwarded-For instead of the proxy's address. Leave unset without a proxy.
+    "NUM_PROXIES": int(os.environ["API_NUM_PROXIES"])
+    if os.environ.get("API_NUM_PROXIES")
+    else None,
+}
+
+# Shared by all web and worker processes, so throttling limits are global rather than
+# per-process. Uses PostgreSQL (created by `createcachetable`); no Redis needed.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "event_bank_cache",
+    }
 }
 
 LOG_LEVEL = os.environ.get("DJANGO_LOG_LEVEL", "INFO")
@@ -170,3 +186,14 @@ CONNECTOR_MAX_REDIRECTS = int(os.environ.get("CONNECTOR_MAX_REDIRECTS", "3"))
 SMS_SENDING_ENABLED = env_bool("SMS_SENDING_ENABLED")
 MNOTIFY_API_KEY = os.environ.get("MNOTIFY_API_KEY", "")
 MNOTIFY_SENDER_ID = os.environ.get("MNOTIFY_SENDER_ID", "")
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_SENDING_ENABLED = env_bool("TELEGRAM_SENDING_ENABLED")
+# Opt in to automatic ingestion explicitly. Manual ingest_source always remains available.
+INGESTION_SCHEDULING_ENABLED = env_bool("INGESTION_SCHEDULING_ENABLED")
+INGESTION_INTERVAL_SECONDS = max(3600, int(os.environ.get("INGESTION_INTERVAL_SECONDS", "3600")))
+# Few sources per worker cycle keeps Telegram polling and delivery responsive.
+INGESTION_SOURCES_PER_CYCLE = max(1, int(os.environ.get("INGESTION_SOURCES_PER_CYCLE", "2")))
+
+# Finished deliveries, /add attempts and dormant subscribers are deleted after this many days.
+DATA_RETENTION_DAYS = max(1, int(os.environ.get("DATA_RETENTION_DAYS", "30")))

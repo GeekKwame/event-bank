@@ -38,5 +38,11 @@ CI runs the same checks, plus a dependency audit and a secret scan.
 
 ## License of contributions
 
-Event Bank currently has no license, and no terms for contributions have been set. Contact the
-maintainer before contributing.
+Contributions to Event Bank are accepted under AGPL-3.0-only, the project's license. Submit only
+code and fixtures you have the right to contribute, and retain notices for third-party material.
+There is no contributor license agreement or copyright assignment requirement.
+
+Useful contributions include platform connectors, synthetic fixtures, source quality fixes,
+frontend accessibility, and notification adapters. See [the alert pipeline](docs/alert-pipeline.md)
+for the current Telegram flow and the remaining work for WhatsApp and SMS. Please include tests
+for parsing failures, duplicate imports and delivery uncertainty where relevant.

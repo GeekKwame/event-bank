@@ -1,0 +1,69 @@
+# Production deployment: gunicorn + WhiteNoise, one worker, PostgreSQL. See docs/deployment.md.
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# Put a TLS-terminating reverse proxy (e.g. Caddy or nginx) in front of `web`; it listens on
+# 127.0.0.1 only. Required variables fail fast if unset.
+x-app: &app
+  build:
+    context: ./backend
+    target: prod
+  restart: unless-stopped
+  # Extra settings such as LUMA_API_KEY_<NAME> or MNOTIFY_*; the values below take precedence.
+  env_file:
+    - path: .env.prod
+      required: false
+  environment:
+    DJANGO_DEBUG: "false"
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY (50+ random characters)}
+    DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?Set DJANGO_ALLOWED_HOSTS to your domain}
+    DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+    DJANGO_BEHIND_TLS_PROXY: ${DJANGO_BEHIND_TLS_PROXY:-true}
+    API_NUM_PROXIES: ${API_NUM_PROXIES:-1}
+    DJANGO_TIME_ZONE: ${DJANGO_TIME_ZONE:-Africa/Accra}
+    POSTGRES_DB: ${POSTGRES_DB:-event_bank}
+    POSTGRES_USER: ${POSTGRES_USER:-event_bank}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_SENDING_ENABLED: ${TELEGRAM_SENDING_ENABLED:-false}
+    INGESTION_SCHEDULING_ENABLED: ${INGESTION_SCHEDULING_ENABLED:-false}
+    INGESTION_INTERVAL_SECONDS: ${INGESTION_INTERVAL_SECONDS:-3600}
+    DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-30}
+    LUMA_API_KEY: ${LUMA_API_KEY:-}
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-event_bank}
+      POSTGRES_USER: ${POSTGRES_USER:-event_bank}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    <<: *app
+    command: >-
+      sh -c "python manage.py migrate --noinput && python manage.py createcachetable
+      && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3
+      --access-logfile - --forwarded-allow-ips '*'"
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-8000}:8000"
+
+  worker:
+    <<: *app
+    command: python manage.py run_worker
+
+volumes:
+  pgdata:

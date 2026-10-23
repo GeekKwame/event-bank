@@ -36,6 +36,9 @@ class Event(models.Model):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.SCHEDULED)
     organizer_name = models.CharField(max_length=300, blank=True)
     image_url = models.URLField(max_length=2000, blank=True)
+    attribution = models.CharField(
+        max_length=500, blank=True, help_text="Credit or licence notice required by the source"
+    )
     content_hash = models.CharField(max_length=64)
     first_seen_at = models.DateTimeField()
     last_seen_at = models.DateTimeField()
@@ -70,6 +73,7 @@ class Event(models.Model):
             status=self.status,
             organizer_name=self.organizer_name,
             image_url=self.image_url,
+            attribution=self.attribution,
         )
 
     def snapshot(self) -> dict:

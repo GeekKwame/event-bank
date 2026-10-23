@@ -29,6 +29,7 @@ def configured_secrets() -> list[str]:
     return [
         settings.SECRET_KEY,
         settings.MNOTIFY_API_KEY,
+        settings.TELEGRAM_BOT_TOKEN,
         settings.DATABASES["default"].get("PASSWORD", ""),
         *(value for name, value in os.environ.items() if _SECRET_ENV_NAME.search(name)),
     ]
