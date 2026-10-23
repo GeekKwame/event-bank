@@ -64,6 +64,15 @@ Source URLs come from users and are fetched by the server. Controls in `backend/
   Incoming commands are obtained from Telegram's authenticated API; chat IDs cannot be supplied
   through a public subscription endpoint. The bot token is redacted even when embedded in a URL.
 - One worker per database paces Telegram messages at 1.1 seconds each with paid broadcasts disabled.
+  A run that would send someone more than five alerts sends one digest instead, and command
+  replies (including `/stop` confirmations) are sent before queued alerts.
+- `/add` is limited per chat to five submissions and ten attempts a day; failed attempts count, so
+  repeated invalid URLs can't trigger unlimited DNS lookups. Duplicate submissions only reveal
+  sources that are already approved.
+- A malformed or unexpected Telegram message is answered with a generic error and skipped; it
+  can't block later messages or stop the worker.
+- Personal data is minimised and expires: after `DATA_RETENTION_DAYS` (default 30) finished
+  deliveries, `/add` attempt records and subscribers who stopped or never opted in are deleted.
 - Phone numbers are validated as Ghana mobile numbers (E.164 `+233…`) before any provider call.
 - Delivery outcomes that may have been sent (`unknown`) are never retried automatically, to avoid
   duplicate messages.
@@ -77,8 +86,11 @@ Source URLs come from users and are fetched by the server. Controls in `backend/
 - DRF denies any view that does not declare `permission_classes`. Health, approved sources,
   supported platforms and upcoming events are public. Source config and subscribers are private.
 - Source submission requires session authentication/CSRF or a Telegram private-chat command.
-  All submissions remain pending until reviewed, with a five-source daily limit per account/chat.
-- Anonymous and authenticated requests are throttled.
+  All submissions remain pending until reviewed, with a five-source daily limit per account/chat
+  (the account limit is enforced under a row lock, so concurrent requests can't exceed it).
+- Anonymous and authenticated requests are throttled. Throttle counts live in a PostgreSQL cache
+  table shared by all processes. Behind a reverse proxy, set `API_NUM_PROXIES` so limits apply per
+  client IP rather than to the proxy's address.
 - With `DEBUG` off: HTTPS redirect, HSTS (1 hour by default, configurable), and secure cookies.
 
 ### Local development
@@ -86,7 +98,13 @@ Source URLs come from users and are fetched by the server. Controls in `backend/
 - Docker Compose binds PostgreSQL and the API to `127.0.0.1`. The development database password is
   a default and must be changed for any shared or production deployment.
 - The container runs as a non-root user.
-- A hardened production deployment (WSGI server, static files, TLS termination) is not provided yet.
+
+### Production
+
+- `docker-compose.prod.yml` runs gunicorn (no dev tools in the image), WhiteNoise for static
+  files, and the worker, with restart policies. Required secrets fail fast if unset, and `web`
+  listens on `127.0.0.1` only. TLS termination is left to a reverse proxy you provide; see
+  [deployment](docs/deployment.md).
 
 ### Supply chain
 

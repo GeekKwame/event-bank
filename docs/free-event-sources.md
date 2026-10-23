@@ -67,23 +67,54 @@ use `--timezone UTC` for a geographically mixed feed, or the appropriate local t
 single-region source. Exact start times must be confirmed with the organiser. Dates are mapped
 as supplied; no cancellation is inferred from a missing row. Past entries are retained as supplied.
 
-The existing safety limits apply: 2 MiB per response and 500 collected events per run. Oversized
-runs fail instead of silently truncating. Prefer a topic file or country filter if the record limit
-is reached. A valid but empty result still produces the pipeline's existing `no_events` failure;
-it does not prove a source is broken. Malformed JSON, row shapes or dates fail the run atomically.
+The existing safety limits apply: 2 MiB per response and 500 collected events per run. A larger
+feed is processed up to the first 500 events and the run records a `run_limit_reached` note;
+the rest are not imported (missing events are never deleted). Prefer a topic file or country
+filter if the limit is reached. A valid but empty result still produces the pipeline's existing
+`no_events` failure; it does not prove a source is broken. Malformed JSON or a wrong overall shape
+fails the run atomically. A single row with a malformed date is skipped as `invalid_date` and
+listed in the run's skipped details; the other rows are imported.
 
 ## Attribution
 
-Event descriptions retain source attribution rather than putting it in `RawEvent.extra`, which
-the current pipeline does not persist. AgentConfs descriptions include the creator, source link,
-CC BY 4.0 link, an indication of normalisation, and the source listing URL when provided.
-confs.tech descriptions include the contributor credit and the upstream MIT permission/warranty
-notice. The aggregator is not mislabelled as the event organiser.
+Each event stores its credit in a separate `attribution` field (at most 500 characters), returned
+by `/api/events/` and appended to Telegram alerts and digests. Descriptions are not used for it.
 
-Future public pages, exports and notification templates must preserve the applicable attribution
-and license notices when reusing this data. Do not assume the repository's software license
-replaces the datasets' licenses. No attendee records, images or arbitrary upstream descriptions
-are copied by these connectors.
+- AgentConfs: the creator, source link, CC BY 4.0 link, an indication of normalisation, and the
+  source listing URL when provided.
+- confs.tech: a short credit to the confs.tech contributors and a link to the repository's MIT
+  licence (`LICENSE.md`). The full MIT permission and warranty notice is reproduced below rather
+  than in every event and message.
+
+The aggregator is not mislabelled as the event organiser. Future public pages, exports and
+notification templates must keep the `attribution` text when reusing this data. Do not assume the
+repository's software license replaces the datasets' licenses. No attendee records, images or
+arbitrary upstream descriptions are copied by these connectors.
+
+**Decision for the operator:** whether a short credit with a licence link satisfies the MIT
+licence's requirement to include its notice "in all copies or substantial portions" of the
+dataset is a legal judgement. If you need the full notice with every copy, publish it alongside
+any bulk export.
+
+### confs.tech licence notice
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+> and associated documentation files (the "Software"), to deal in the Software without
+> restriction, including without limitation the rights to use, copy, modify, merge, publish,
+> distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+> Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+> BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The copyright line itself is in the upstream
+[LICENSE.md](https://github.com/tech-conferences/conference-data/blob/main/LICENSE.md).
 
 ## Verification
 

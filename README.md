@@ -14,21 +14,25 @@ The software needs no paid scraping or AI service; external messaging and hostin
 |---|---|
 | Source registration (`add_source`), admin approval | Implemented |
 | SSRF-hardened fetching (`SafeFetcher`) | Implemented |
-| schema.org JSON-LD extraction | Implemented |
+| schema.org JSON-LD extractor | Available to connector authors; no production connector uses it yet |
 | Normalisation, fingerprinting, change detection | Implemented |
 | Transactional, idempotent ingestion (`ingest_source`) | Implemented |
 | confs.tech public JSON connector (free) | Implemented; live fetch and normalisation verified |
 | AgentConfs public JSON connector (free) | Implemented against synthetic fixtures; direct live access returned HTTP 403 |
 | Luma iCal feed connector (free) | Implemented and tested against synthetic fixtures; not yet run against live feeds |
 | Luma connector (official API, Luma Plus) | Implemented and tested against synthetic fixtures; not yet run against the live API |
+| Verified event import (`import_events`) | Implemented |
 | Source submission and public events/platforms API | Implemented; submissions require login or a private Telegram chat |
 | Telegram follows, opt-in and `/stop` | Implemented; tested with mocked Telegram responses |
-| Transactional alert outbox and bounded retries | Implemented; uncertain sends are never retried |
+| Transactional alert outbox, digests and bounded retries | Implemented; uncertain sends are never retried |
 | PostgreSQL scheduling/delivery worker | Implemented; scheduling and real Telegram sending disabled by default |
+| Data retention purge | Implemented; finished deliveries and dormant chat IDs deleted after 30 days |
+| Production deployment (gunicorn, WhiteNoise, Compose) | Implemented; TLS reverse proxy not included |
 | mNotify SMS provider client | Implemented, not wired to a subscriber workflow; real sending disabled by default |
 | WhatsApp, SMS subscriber workflow, frontend | Not implemented |
 
-To add another platform, see [docs/adding-a-connector.md](docs/adding-a-connector.md).
+To add another platform, see [docs/adding-a-connector.md](docs/adding-a-connector.md). To add
+events confirmed with organisers, see [docs/verified-events.md](docs/verified-events.md).
 
 For the complete URL → event → Telegram setup, see [running the alert pipeline](docs/alert-pipeline.md).
 No real Telegram messages have been sent during development verification.
@@ -113,10 +117,32 @@ organiser.
 Only events the calendar itself manages are collected. Events listed on the calendar but managed
 by other hosts are excluded until Luma confirms in writing that redistributing them is permitted.
 
+## Events API
+
+Public and read-only. `GET /api/events/` lists upcoming (not yet ended), non-cancelled events from
+approved sources, soonest first, 25 per page. `GET /api/events/<id>/` returns one event.
+
+| Parameter | Values |
+|---|---|
+| `when` | `upcoming` (default), `past`, `all` |
+| `starts_after`, `starts_before` | `YYYY-MM-DD`, inclusive, in the server timezone |
+| `location` | Text matched against venue and address, e.g. `Accra` |
+| `attendance` | `online` (online or hybrid), `in_person` (in person or hybrid) |
+| `attendance_mode` | Exact match: `online`, `offline`, `mixed` |
+| `include_cancelled` | `true` to include cancelled events |
+| `source` | Source ID |
+| `page`, `page_size` | `page_size` up to 100 |
+
+Each event includes `url` (registration or official page), `attribution` (credit required by the
+data's licence, if any), `source_name`, `source_platform`, `source_url`, and two freshness
+timestamps: `last_seen_at` (when its source last confirmed it) and `source_last_checked_at` (the
+source's last successful ingestion). Invalid parameters return 400.
+
 ## Stack
 
-Python 3.13, Django + Django REST Framework, PostgreSQL 17, HTTPX, Beautiful Soup,
-`uv` for dependency locking, Docker Compose for local development, GitHub Actions for CI.
+Python 3.13, Django + Django REST Framework, PostgreSQL 17, HTTPX, Beautiful Soup, icalendar,
+`uv` for dependency locking, Docker Compose for development and deployment, gunicorn and
+WhiteNoise in production, GitHub Actions for CI.
 
 ## Getting started
 
@@ -127,7 +153,10 @@ curl http://127.0.0.1:8000/api/health/
 ```
 
 If ports 8000 or 5432 are already in use, set `BACKEND_HOST_PORT` / `POSTGRES_HOST_PORT` in
-`.env`. Ports are bound to `127.0.0.1` only.
+`.env`. Ports are bound to `127.0.0.1` only. The `worker` service also starts; it stays idle until
+scheduling or Telegram sending is enabled in `.env`.
+
+To run Event Bank on a server, see [deployment](docs/deployment.md).
 
 ## Commands
 
@@ -138,10 +167,18 @@ docker compose exec backend ruff format .
 docker compose exec backend python manage.py makemigrations
 docker compose exec backend python manage.py createsuperuser
 
-# Register a source (pending until approved), or approve immediately as the operator:
-docker compose exec backend python manage.py add_source https://example.org/events --approve
+# Register a supported source URL (pending until approved), or approve it as the operator.
+# Only URLs that a connector supports are accepted (see GET /api/platforms/):
+docker compose exec backend python manage.py add_source \
+    https://raw.githubusercontent.com/tech-conferences/conference-data/main/conferences/2026/python.json \
+    --approve
 # Fetch an approved source once and store its events:
 docker compose exec backend python manage.py ingest_source <source-id>
+# Load events verified with organisers (see docs/verified-events.md):
+docker compose exec backend python manage.py import_events /tmp/events.json \
+    --source-url https://organiser.example.org/ --source-name "Organiser"
+# Delete data past the retention period (the worker also does this hourly):
+docker compose exec backend python manage.py purge_expired_data
 ```
 
 Sources, ingestion runs, events and their revision history are visible in the Django admin at
@@ -156,6 +193,9 @@ After changing dependencies, run `uv lock` in `backend/` and commit the lock fil
 
 - [Architecture](docs/architecture.md)
 - [Running the alert pipeline](docs/alert-pipeline.md)
+- [Deployment](docs/deployment.md)
+- [Verified events (organiser submissions)](docs/verified-events.md)
+- [Free event sources](docs/free-event-sources.md)
 - [Adding a connector](docs/adding-a-connector.md)
 - [Security policy and threat model](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
