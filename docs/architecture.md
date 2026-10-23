@@ -119,11 +119,31 @@ Telegram and WhatsApp will be separate provider modules.
 
 ## API
 
-Only `GET /api/health/` exists. DRF's default permission is `DenyAll`, so every future view must
-declare `permission_classes`; `tests/test_common.py` fails if one does not. Anonymous and
-authenticated requests are throttled by default.
+DRF's default permission is `DenyAll`, so every view must declare `permission_classes`;
+`tests/test_common.py` fails if one does not. Anonymous and authenticated requests are throttled
+by default.
+
+- `GET /api/health/`: public health check.
+- `GET /api/events/` and `GET /api/events/<id>/` (`apps/events/api.py`): public and read-only, with
+  no authentication or CSRF. Only events from `approved` sources are published; pausing or rejecting
+  a source hides its events. Filters are validated by `EventFilterSerializer`, and invalid values
+  return 400. Each source's last successful run is added with one subquery, so a page costs a
+  constant number of queries. "Upcoming" means `ends_at` is in the future, or there is no `ends_at`
+  and `starts_at` is in the future; events without a start time are never listed.
+
+## Verified event imports
+
+`import_events` (`apps/ingestion/imports.py`) loads a JSON file of operator-verified events into a
+source with connector `manual`, which is created approved and never fetched (`ingest_source`
+refuses it). The file is validated strictly before anything is written. The events then go
+through the same `run_ingestion()` path as fetched sources: one `SourceRun` (trigger `import`),
+normalisation, and a single transaction for upserts and revisions. See `docs/verified-events.md`.
 
 ## Not yet built
 
-Scheduling worker (Phase 2), public API (Phase 2), subscribers and consent (Phase 3), notification
-outbox, delivery tracking and retries (Phase 4), Telegram and WhatsApp (Phase 5+).
+Scheduling worker, events page, subscribers and consent, notification outbox, delivery tracking
+and retries, Telegram and WhatsApp.
+
+Known issue to fix before scheduling: two runs of the same source fetch outside the transaction,
+so a slower run that fetched earlier could commit after a newer run and overwrite fresher data.
+A valid but empty source also fails with `no_events`, the same as an extraction failure.

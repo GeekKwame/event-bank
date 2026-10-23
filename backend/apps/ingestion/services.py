@@ -1,7 +1,7 @@
 import itertools
 import logging
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 from django.db import transaction
 from django.utils import timezone
@@ -11,7 +11,7 @@ from apps.events.services import upsert_events
 from apps.ingestion.models import SourceRun
 from apps.sources.models import Source
 from apps.sources.services import fetch_policy_for
-from connectors.base import ConnectorError, Fetcher, SourceSpec
+from connectors.base import ConnectorError, Fetcher, RawEvent, SourceSpec
 from connectors.http import FetchError, FetchPolicy, SafeFetcher
 from connectors.registry import UnsupportedSourceError, get_connector
 from pipeline.normalize import normalize_events
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 MAX_EVENTS_PER_RUN = 500
 MAX_SKIPPED_DETAILS = 50
+MANUAL_CONNECTOR = "manual"
 
 FetcherFactory = Callable[[FetchPolicy], Fetcher]
 
@@ -45,43 +46,17 @@ def _error_details(exc: Exception) -> tuple[str, str]:
     return code, redact(message, configured_secrets())[:1000]
 
 
-def ingest_source(
-    source_id: int,
-    *,
-    trigger: str = SourceRun.Trigger.MANUAL,
-    fetcher_factory: FetcherFactory = SafeFetcher,
-    environ: Mapping[str, str] = os.environ,
+def run_ingestion(
+    source: Source, *, trigger: str, collect: Callable[[], Sequence[RawEvent]]
 ) -> SourceRun:
-    """Fetch one approved source and upsert its events in a single transaction.
+    """Record a run, collect raw events, then normalise and upsert them in one transaction.
 
-    Network I/O happens before the transaction opens. If anything fails, the
+    `collect` does any I/O before the transaction opens. If anything fails, the
     run is marked failed and no event rows are changed.
     """
-    source = Source.objects.get(pk=source_id)
-    if not source.is_approved:
-        raise SourceNotApprovedError(
-            "source_not_approved", f"Source #{source.pk} is {source.status}, not approved"
-        )
-
     run = SourceRun.objects.create(source=source, trigger=trigger)
     try:
-        connector_cls = get_connector(source.connector)
-        config = connector_cls.validate_config(source.config)
-        spec = SourceSpec(
-            url=source.url,
-            timezone=source.timezone,
-            config=config,
-            credentials=connector_cls.credentials_from_env(config, environ),
-        )
-        fetcher = fetcher_factory(fetch_policy_for(connector_cls))
-        try:
-            raw_events = list(
-                itertools.islice(connector_cls().collect(spec, fetcher), MAX_EVENTS_PER_RUN + 1)
-            )
-        finally:
-            close = getattr(fetcher, "close", None)
-            if close is not None:
-                close()
+        raw_events = list(collect())
         if len(raw_events) > MAX_EVENTS_PER_RUN:
             raise IngestionError(
                 "too_many_events", f"Source returned more than {MAX_EVENTS_PER_RUN} events"
@@ -121,3 +96,43 @@ def ingest_source(
         run.error_message = message
         run.save()
     return run
+
+
+def ingest_source(
+    source_id: int,
+    *,
+    trigger: str = SourceRun.Trigger.MANUAL,
+    fetcher_factory: FetcherFactory = SafeFetcher,
+    environ: Mapping[str, str] = os.environ,
+) -> SourceRun:
+    """Fetch one approved source through its connector and store its events."""
+    source = Source.objects.get(pk=source_id)
+    if not source.is_approved:
+        raise SourceNotApprovedError(
+            "source_not_approved", f"Source #{source.pk} is {source.status}, not approved"
+        )
+    if source.connector == MANUAL_CONNECTOR:
+        raise IngestionError(
+            "manual_source", f"Source #{source.pk} is updated with import_events, not fetched"
+        )
+
+    def collect() -> list[RawEvent]:
+        connector_cls = get_connector(source.connector)
+        config = connector_cls.validate_config(source.config)
+        spec = SourceSpec(
+            url=source.url,
+            timezone=source.timezone,
+            config=config,
+            credentials=connector_cls.credentials_from_env(config, environ),
+        )
+        fetcher = fetcher_factory(fetch_policy_for(connector_cls))
+        try:
+            return list(
+                itertools.islice(connector_cls().collect(spec, fetcher), MAX_EVENTS_PER_RUN + 1)
+            )
+        finally:
+            close = getattr(fetcher, "close", None)
+            if close is not None:
+                close()
+
+    return run_ingestion(source, trigger=trigger, collect=collect)

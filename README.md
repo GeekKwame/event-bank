@@ -14,10 +14,33 @@ SMS, Telegram and WhatsApp.
 | Normalisation, fingerprinting, change detection | Implemented |
 | Transactional, idempotent ingestion (`ingest_source`) | Implemented |
 | Luma connector (official API) | Implemented and tested against synthetic fixtures; not yet run against the live API |
+| Verified event import (`import_events`) | Implemented |
+| Read-only events API (`GET /api/events/`) | Implemented |
 | mNotify SMS provider client | Implemented, not wired to any workflow; real sending disabled by default |
-| Scheduling, public API, subscribers, notification delivery | Not started (later phases) |
+| Scheduling, events page, subscribers, notification delivery | Not started (later phases) |
 
-To add another platform, see [docs/adding-a-connector.md](docs/adding-a-connector.md).
+To add another platform, see [docs/adding-a-connector.md](docs/adding-a-connector.md). To add
+events confirmed with organisers, see [docs/verified-events.md](docs/verified-events.md).
+
+## Events API
+
+Public and read-only. `GET /api/events/` lists upcoming, non-cancelled events from approved
+sources, soonest first, 25 per page. `GET /api/events/<id>/` returns one event.
+
+| Parameter | Values |
+|---|---|
+| `when` | `upcoming` (default: not yet ended), `past`, `all` |
+| `starts_after`, `starts_before` | `YYYY-MM-DD`, inclusive, in the server timezone |
+| `location` | Text matched against venue and address, e.g. `Accra` |
+| `attendance` | `online` (online or hybrid), `in_person` (in person or hybrid) |
+| `include_cancelled` | `true` to include cancelled events |
+| `source` | Source ID |
+| `page`, `page_size` | `page_size` up to 100 |
+
+Each event has `url` (the registration or official page) and a `source` object with `name`,
+`platform`, `url` and `last_checked_at`, the source's last successful ingestion. `last_seen_at` is
+when the event was last confirmed by its source. Invalid parameters return 400. Anonymous requests
+are throttled (60 per minute by default).
 
 ## Luma calendars
 
