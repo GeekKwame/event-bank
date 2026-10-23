@@ -50,12 +50,15 @@ def register_source(
     try:
         check_url(url)
         connector_cls = match_connector(url)
+        canonical_url = connector_cls.canonicalize_url(url)
     except UnsafeURLError as exc:
         raise SourceRegistrationError(exc.code, str(exc)) from None
     except UnsupportedSourceError as exc:
         raise SourceRegistrationError("unsupported_source", str(exc)) from None
+    except ValueError:
+        # urllib and httpx disagree on some malformed URLs (e.g. "https://a[b/").
+        raise SourceRegistrationError("invalid_url", "URL could not be parsed") from None
 
-    canonical_url = connector_cls.canonicalize_url(url)
     try:
         validate_fetch_target(
             canonical_url,
@@ -64,6 +67,8 @@ def register_source(
         )
     except UnsafeURLError as exc:
         raise SourceRegistrationError(exc.code, str(exc)) from None
+    except ValueError:
+        raise SourceRegistrationError("invalid_url", "URL could not be parsed") from None
 
     try:
         cleaned_config = connector_cls.validate_config(config or {})

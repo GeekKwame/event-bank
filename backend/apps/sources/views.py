@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, serializers
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -9,6 +11,8 @@ from rest_framework.views import APIView
 from apps.sources.models import Source
 from apps.sources.services import SourceRegistrationError, register_source
 from connectors.registry import all_connectors
+
+MAX_SUBMISSIONS_PER_DAY = 5
 
 
 class SourceSerializer(serializers.ModelSerializer):
@@ -24,19 +28,20 @@ class SourceSubmissionSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         user = self.context["request"].user
-        if (
-            Source.objects.filter(
+        with transaction.atomic():
+            # Serialise one user's submissions so concurrent requests can't exceed the limit.
+            get_user_model().objects.select_for_update().filter(pk=user.pk).first()
+            recent = Source.objects.filter(
                 submitted_by=user, created_at__gte=timezone.now() - timedelta(days=1)
-            ).count()
-            >= 5
-        ):
-            raise serializers.ValidationError(
-                {"code": "submission_limit", "detail": "Five sources per day"}
             )
-        try:
-            return register_source(**validated_data, submitted_by=user)
-        except SourceRegistrationError as exc:
-            raise serializers.ValidationError({"code": exc.code, "detail": str(exc)}) from None
+            if recent.count() >= MAX_SUBMISSIONS_PER_DAY:
+                raise serializers.ValidationError(
+                    {"code": "submission_limit", "detail": "Five sources per day"}
+                )
+            try:
+                return register_source(**validated_data, submitted_by=user)
+            except SourceRegistrationError as exc:
+                raise serializers.ValidationError({"code": exc.code, "detail": str(exc)}) from None
 
 
 class SourceListView(generics.ListAPIView):

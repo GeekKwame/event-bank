@@ -1,16 +1,24 @@
 """Private-chat commands. Process updates transactionally with an idempotent reply outbox."""
 
+import logging
 from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
 
 from apps.notifications.models import Delivery
+from apps.notifications.services import cancel_pending_alerts
 from apps.sources.models import Source
 from apps.sources.services import SourceRegistrationError, register_source
 from apps.subscriptions.models import Subscriber, Subscription, TelegramCursor
-from connectors.registry import all_connectors, match_connector
+from connectors.registry import UnsupportedSourceError, all_connectors, match_connector
 
+logger = logging.getLogger(__name__)
+
+MAX_SOURCE_SUBMISSIONS_PER_DAY = 5
+MAX_SOURCE_ATTEMPTS_PER_DAY = 10
+
+ERROR_REPLY = "Sorry, that message could not be processed. Send /help to see the commands."
 HELP = (
     "Event Bank finds tech events from supported sources.\n"
     "/sources — approved sources\n"
@@ -21,6 +29,18 @@ HELP = (
     "/stop — stop all alerts and remove follows\n"
     "Following sends future alerts, not a backlog. Only public event data is collected."
 )
+
+
+def _duplicate_source_reply(url):
+    """Only reveal approved sources; pending or rejected submissions stay private."""
+    try:
+        canonical = match_connector(url).canonicalize_url(url)
+    except (UnsupportedSourceError, ValueError):
+        canonical = None
+    existing = Source.objects.filter(url=canonical, status=Source.Status.APPROVED).first()
+    if existing is not None:
+        return f"Source #{existing.pk} is already available. Use /follow {existing.pk} for alerts."
+    return "This source has already been submitted."
 
 
 def _command(subscriber, text):
@@ -34,11 +54,7 @@ def _command(subscriber, text):
         subscriber.stopped_at = timezone.now()
         subscriber.save(update_fields=["active", "stopped_at"])
         subscriber.subscriptions.all().delete()
-        Delivery.objects.filter(
-            subscriber=subscriber, revision__isnull=False, status=Delivery.Status.PENDING
-        ).update(
-            status=Delivery.Status.CANCELLED, finished_at=timezone.now(), error_code="opted_out"
-        )
+        cancel_pending_alerts(subscriber, reason="opted_out")
         return "Alerts stopped and follows removed. Use /follow SOURCE_ID to opt in again."
     if command == "/platforms":
         names = "\n".join(f"- {cls.name}" for cls in all_connectors().values())
@@ -52,15 +68,7 @@ def _command(subscriber, text):
             return f"Usage: {command} SOURCE_ID"
         if command == "/unfollow":
             subscriber.subscriptions.filter(source_id=int(argument)).delete()
-            Delivery.objects.filter(
-                subscriber=subscriber,
-                revision__event__source_id=int(argument),
-                status=Delivery.Status.PENDING,
-            ).update(
-                status=Delivery.Status.CANCELLED,
-                error_code="unfollowed",
-                finished_at=timezone.now(),
-            )
+            cancel_pending_alerts(subscriber, source_id=int(argument), reason="unfollowed")
             return f"Unfollowed source #{argument}."
         source = Source.objects.filter(pk=int(argument), status=Source.Status.APPROVED).first()
         if source is None:
@@ -78,18 +86,21 @@ def _command(subscriber, text):
     if command == "/add":
         if not argument or len(argument) > 2000 or any(char.isspace() for char in argument):
             return "Usage: /add HTTPS_URL"
-        # Limit source requests per chat, including requests still awaiting review.
-        since = timezone.now() - timedelta(days=1)
-        if subscriber.source_requests.filter(created_at__gte=since).count() >= 5:
+        # Every attempt counts (each can trigger a DNS lookup), not only accepted submissions.
+        recent = subscriber.source_requests.filter(
+            created_at__gte=timezone.now() - timedelta(days=1)
+        )
+        if recent.count() >= MAX_SOURCE_ATTEMPTS_PER_DAY:
+            return "You have reached today's limit for /add. Please try again tomorrow."
+        if recent.filter(source__isnull=False).count() >= MAX_SOURCE_SUBMISSIONS_PER_DAY:
             return "You can submit five sources per day. Please try again tomorrow."
         try:
             # Do not accept user-controlled credentials or connector configuration over chat.
             source = register_source(argument)
         except SourceRegistrationError as exc:
+            subscriber.source_requests.create(source=None, outcome=exc.code[:32])
             if exc.code == "duplicate_source":
-                canonical = match_connector(argument).canonicalize_url(argument)
-                existing = Source.objects.get(url=canonical)
-                return f"Source #{existing.pk} already exists ({existing.status})."
+                return _duplicate_source_reply(argument)
             return f"Source not added: {exc.code}. Use /platforms to see supported sources."
         subscriber.source_requests.create(source=source)
         return (
@@ -97,6 +108,41 @@ def _command(subscriber, text):
             f"After approval, use /follow {source.pk} to opt in to alerts."
         )
     return HELP
+
+
+def _private_text_message(update):
+    """Return (chat_id, text) for a text message in a private chat with a person, else None."""
+    message = update.get("message")
+    message = message if isinstance(message, dict) else {}
+    chat = message.get("chat")
+    chat = chat if isinstance(chat, dict) else {}
+    sender = message.get("from")
+    sender = sender if isinstance(sender, dict) else {}
+    text = message.get("text")
+    chat_id = chat.get("id")
+    if (
+        chat.get("type") == "private"
+        and type(chat_id) is int
+        and 0 < chat_id < 10**20
+        and sender.get("id") == chat_id
+        and sender.get("is_bot") is False
+        and isinstance(text, str)
+        and len(text) <= 4096
+    ):
+        return chat_id, text
+    return None
+
+
+def _queue_reply(bot_id, update_id, subscriber, message):
+    Delivery.objects.get_or_create(
+        dedupe_key=f"telegram:{bot_id}:update:{update_id}",
+        defaults={"subscriber": subscriber, "message": message, "kind": Delivery.Kind.REPLY},
+    )
+
+
+def _locked_subscriber(chat_id):
+    subscriber, _ = Subscriber.objects.get_or_create(telegram_chat_id=str(chat_id))
+    return Subscriber.objects.select_for_update().get(pk=subscriber.pk)
 
 
 def process_update(bot_id, update):
@@ -108,30 +154,22 @@ def process_update(bot_id, update):
         cursor = TelegramCursor.objects.select_for_update().get(pk=cursor.pk)
         if update_id < cursor.next_update_id:
             return False
-        message = update.get("message")
-        message = message if isinstance(message, dict) else {}
-        chat = message.get("chat")
-        chat = chat if isinstance(chat, dict) else {}
-        sender = message.get("from")
-        sender = sender if isinstance(sender, dict) else {}
-        text = message.get("text")
-        chat_id = chat.get("id")
-        if (
-            chat.get("type") == "private"
-            and type(chat_id) is int
-            and 0 < chat_id < 10**20
-            and sender.get("id") == chat_id
-            and sender.get("is_bot") is False
-            and isinstance(text, str)
-            and len(text) <= 4096
-        ):
-            subscriber, _ = Subscriber.objects.get_or_create(telegram_chat_id=str(chat_id))
-            subscriber = Subscriber.objects.select_for_update().get(pk=subscriber.pk)
-            reply = _command(subscriber, text)
-            Delivery.objects.get_or_create(
-                dedupe_key=f"telegram:{bot_id}:update:{update_id}",
-                defaults={"subscriber": subscriber, "message": reply},
-            )
+        incoming = _private_text_message(update)
+        if incoming is not None:
+            chat_id, text = incoming
+            try:
+                with transaction.atomic():
+                    subscriber = _locked_subscriber(chat_id)
+                    _queue_reply(bot_id, update_id, subscriber, _command(subscriber, text))
+            except Exception:
+                # One bad update must never block the queue: the cursor always advances.
+                logger.exception("Telegram update %s could not be processed", update_id)
+                try:
+                    with transaction.atomic():
+                        subscriber = _locked_subscriber(chat_id)
+                        _queue_reply(bot_id, update_id, subscriber, ERROR_REPLY)
+                except Exception:
+                    logger.exception("No error reply could be queued for update %s", update_id)
         cursor.next_update_id = update_id + 1
         cursor.save(update_fields=["next_update_id"])
     return True

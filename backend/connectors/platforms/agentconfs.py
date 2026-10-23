@@ -7,7 +7,7 @@ and persistence. Never copy arbitrary fields such as contact/attendee data.
 
 from urllib.parse import urlsplit
 
-from connectors.base import AttendanceMode, Connector, RawEvent
+from connectors.base import AttendanceMode, Connector, ConnectorError, RawEvent
 from connectors.extract.event_json import (
     country_config,
     date_field,
@@ -53,20 +53,27 @@ class AgentConfsConnector(Connector):
                 continue
             # Do not turn provisional dates into confirmed event times.
             tentative = row.get("dates_to_be_confirmed") is True
+            external_id = text_field(row.get("id"))
+            try:
+                start = None if tentative else date_field(row.get("start_date"))
+                end = None if tentative else date_field(row.get("end_date"))
+            except ConnectorError:
+                # One malformed row must not fail the whole feed.
+                yield RawEvent.skipped(external_id, "invalid_date")
+                continue
             page = text_field(row.get("page"))
             parts = urlsplit(page)
             credit = ATTRIBUTION
             if parts.scheme == "https" and parts.netloc == "agentconfs.com":
                 credit += f" Listing: {page}"
-            if tentative:
-                credit += " Dates to be confirmed."
             yield RawEvent(
-                external_id=text_field(row.get("id")),
+                external_id=external_id,
                 title=text_field(row.get("name")),
                 url=text_field(row.get("official_url")) or page,
-                starts_at=None if tentative else date_field(row.get("start_date")),
-                ends_at=None if tentative else date_field(row.get("end_date")),
-                description=credit,
+                starts_at=start,
+                ends_at=end,
+                description="Dates to be confirmed." if tentative else None,
+                attribution=credit,
                 venue_name=text_field(row.get("venue")),
                 address=location(row),
                 attendance_mode={

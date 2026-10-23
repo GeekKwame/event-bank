@@ -10,7 +10,7 @@ import json
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-from connectors.base import AttendanceMode, Connector, RawEvent
+from connectors.base import AttendanceMode, Connector, ConnectorError, RawEvent
 from connectors.extract.event_json import (
     country_config,
     date_field,
@@ -40,10 +40,12 @@ DATA_LICENSE = (
     "OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER "
     "DEALINGS IN THE SOFTWARE."
 )
+# Short per-event credit. The full notice above is published with the project documentation
+# (docs/free-event-sources.md) and linked here rather than repeated in every event and alert.
+LICENSE_URL = "https://github.com/tech-conferences/conference-data/blob/main/LICENSE.md"
 ATTRIBUTION = (
-    "Event data: confs.tech contributors "
-    "(https://github.com/tech-conferences/conference-data), MIT license. "
-    "Selected fields have been reformatted and normalised by Event Bank.\n\n" + DATA_LICENSE
+    "Event data: confs.tech contributors (https://github.com/tech-conferences/conference-data), "
+    f"MIT license: {LICENSE_URL}. Reformatted by Event Bank."
 )
 
 
@@ -75,7 +77,13 @@ class ConfsTechConnector(Connector):
             if not matches_country(row, config):
                 continue
             url = text_field(row.get("url"))
-            start = date_field(row.get("startDate"))
+            try:
+                start = date_field(row.get("startDate"))
+                end = date_field(row.get("endDate"))
+            except ConnectorError:
+                # One malformed row must not fail the whole file.
+                yield RawEvent.skipped(url or text_field(row.get("name")), "invalid_date")
+                continue
             # Missing identity components must not collapse unrelated entries.
             identity = json.dumps([url, start.isoformat() if start else None])
             external_id = hashlib.sha256(identity.encode()).hexdigest() if url and start else ""
@@ -85,8 +93,8 @@ class ConfsTechConnector(Connector):
                 title=text_field(row.get("name")),
                 url=url,
                 starts_at=start,
-                ends_at=date_field(row.get("endDate")),
-                description=ATTRIBUTION,
+                ends_at=end,
+                attribution=ATTRIBUTION,
                 address=location(row),
                 attendance_mode=(
                     AttendanceMode.ONLINE

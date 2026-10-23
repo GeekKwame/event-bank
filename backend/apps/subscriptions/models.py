@@ -45,10 +45,13 @@ class TelegramCursor(models.Model):
 
 
 class SourceRequest(models.Model):
+    """One /add attempt. Failed attempts are recorded too, so they count towards rate limits."""
+
     subscriber = models.ForeignKey(
         Subscriber, on_delete=models.CASCADE, related_name="source_requests"
     )
-    source = models.ForeignKey("sources.Source", on_delete=models.CASCADE)
+    source = models.ForeignKey("sources.Source", null=True, blank=True, on_delete=models.CASCADE)
+    outcome = models.CharField(max_length=32, default="submitted")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

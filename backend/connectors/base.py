@@ -47,7 +47,15 @@ class RawEvent:
     status: EventStatus = EventStatus.SCHEDULED
     organizer_name: str | None = None
     image_url: str | None = None
+    attribution: str | None = None
+    """Short credit/licence notice required by the source's data licence, if any."""
+    skip_reason: str | None = None
+    """Set by a connector for a row it could not read; the row is skipped and reported."""
     extra: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def skipped(cls, external_id: str, reason: str) -> "RawEvent":
+        return cls(external_id=external_id, title="", url="", skip_reason=reason)
 
 
 @dataclass(frozen=True)
@@ -105,8 +113,11 @@ class Connector(ABC):
 
     @classmethod
     def matches(cls, url: str) -> bool:
-        parts = urlsplit(url)
-        host = (parts.hostname or "").lower()
+        try:
+            parts = urlsplit(url)
+            host = (parts.hostname or "").lower()
+        except ValueError:
+            return False
         return (
             parts.scheme == "https"
             and host in cls.source_url_hosts()

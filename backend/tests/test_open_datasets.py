@@ -13,7 +13,7 @@ from apps.sources.services import fetch_policy_for, register_source
 from connectors.base import ConnectorError, SourceSpec
 from connectors.http import SafeFetcher
 from connectors.platforms.agentconfs import FEED_URL, AgentConfsConnector
-from connectors.platforms.confstech import DATA_LICENSE, ConfsTechConnector
+from connectors.platforms.confstech import ATTRIBUTION, DATA_LICENSE, ConfsTechConnector
 from connectors.registry import get_connector, match_connector
 from pipeline.normalize import normalize_events
 from tests.conftest import PUBLIC_IP, public_resolver
@@ -92,7 +92,8 @@ def test_dataset_mapping_and_fetch_policy(connector, url, row):
     assert event.attendance_mode == "offline"
     assert event.address == "Accra, Ghana"
     assert "private@example.org" not in repr(events)
-    assert "Event Bank" in event.description
+    assert "Event Bank" in event.attribution
+    assert event.description == ""
     assert site.requests[0].url.host == PUBLIC_IP
     assert "authorization" not in site.requests[0].headers
     assert "x-luma-api-key" not in site.requests[0].headers
@@ -146,11 +147,14 @@ def test_wrong_shapes_fail_explicitly(connector, url, row, payload):
 
 
 @pytest.mark.parametrize(("connector", "url", "row"), DATASETS)
-def test_bad_dates_fail_explicitly(connector, url, row):
-    row = {**row, ("start_date" if connector is AgentConfsConnector else "startDate"): "wrong"}
-    with pytest.raises(ConnectorError) as exc:
-        collect(connector, url, [row])
-    assert exc.value.code == "unexpected_response"
+def test_bad_dates_skip_only_that_row(connector, url, row):
+    bad = {**row, ("start_date" if connector is AgentConfsConnector else "startDate"): "wrong"}
+    if connector is AgentConfsConnector:
+        bad["id"] = "synthetic-bad"
+    events, _ = collect(connector, url, [bad, row])
+    result = normalize_events(events, default_timezone="UTC")
+    assert [event.title for event in result.events] == [row["name"]]
+    assert [skipped.reason for skipped in result.skipped] == ["invalid_date"]
 
 
 def test_agentconfs_envelope_tentative_dates_and_attribution():
@@ -160,8 +164,8 @@ def test_agentconfs_envelope_tentative_dates_and_attribution():
     assert event.starts_at is None and event.ends_at is None
     assert event.attendance_mode == "mixed"
     assert "Dates to be confirmed" in event.description
-    assert "CC BY 4.0" in event.description
-    assert row["page"] in event.description
+    assert "CC BY 4.0" in event.attribution
+    assert row["page"] in event.attribution
     assert event.organizer_name == "Example Community"
 
 
@@ -195,7 +199,8 @@ def test_confstech_recurring_urls_do_not_collapse_and_ids_ignore_title_edits():
     assert events[0].external_id != events[1].external_id
     renamed, _ = collect(ConfsTechConnector, CONFS_URL, [{**CONFS_ROW, "name": "Renamed"}])
     assert renamed[0].external_id == events[0].external_id
-    assert DATA_LICENSE in events[0].description
+    assert events[0].attribution == ATTRIBUTION
+    assert DATA_LICENSE not in repr(events[0])
     assert events[1].starts_at == date(2026, 12, 1)
 
 
@@ -211,7 +216,7 @@ def test_register_ingest_repeat_change_and_failure(connector, url, row):
     assert first.status == "succeeded", first.error_message
     assert first.events_created == 1
     event = Event.objects.get(source=source)
-    assert ("CC BY 4.0" if connector is AgentConfsConnector else "MIT license") in event.description
+    assert ("CC BY 4.0" if connector is AgentConfsConnector else "MIT license") in event.attribution
 
     second = ingest_source(source.pk, fetcher_factory=site.fetcher_factory, environ={})
     assert second.events_unchanged == 1

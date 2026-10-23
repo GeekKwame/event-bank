@@ -93,20 +93,19 @@ def test_provider_runs_outside_transaction_and_claim_prevents_duplicate_send():
 
 def test_dataset_credit_and_long_links_survive_alert_rendering(followed_source, fake_site):
     from apps.notifications.services import render_alert
-    from connectors.platforms.confstech import ATTRIBUTION, DATA_LICENSE
+    from connectors.platforms.confstech import ATTRIBUTION, DATA_LICENSE, LICENSE_URL
 
     source, _ = followed_source
     ingest_source(source.pk, fetcher_factory=fake_site.fetcher_factory)
-    source.connector = "confstech"
-    source.save()
     event = Event.objects.get(external_id="evt-meetup")
-    event.description = ATTRIBUTION
+    event.attribution = ATTRIBUTION
     event.url = "https://example.org/" + "a" * 1900
     event.title = "🙂" * 300
     event.save()
     revision = event.revisions.select_related("event__source").get()
     message = render_alert(revision)
-    assert DATA_LICENSE in message and event.url in message
+    assert ATTRIBUTION in message and LICENSE_URL in message and event.url in message
+    assert DATA_LICENSE not in message
     assert len(message.encode("utf-16-le")) // 2 <= 4096
 
 

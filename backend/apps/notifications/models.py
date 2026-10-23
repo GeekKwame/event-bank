@@ -11,9 +11,22 @@ class Delivery(models.Model):
         UNKNOWN = "unknown"
         CANCELLED = "cancelled"
 
+    class Kind(models.TextChoices):
+        REPLY = "reply", "Command reply"
+        ALERT = "alert", "Event alert"
+        DIGEST = "digest", "Alert digest"
+
     subscriber = models.ForeignKey("subscriptions.Subscriber", on_delete=models.CASCADE)
+    kind = models.CharField(max_length=8, choices=Kind.choices, default=Kind.ALERT)
     revision = models.ForeignKey(
         "events.EventRevision", null=True, blank=True, on_delete=models.CASCADE
+    )
+    source = models.ForeignKey(
+        "sources.Source",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        help_text="Set for digests, which summarise several revisions from one source.",
     )
     dedupe_key = models.CharField(max_length=120, unique=True)
     message = models.TextField()
