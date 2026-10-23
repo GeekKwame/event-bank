@@ -38,5 +38,5 @@ CI runs the same checks, plus a dependency audit and a secret scan.
 
 ## License of contributions
 
-Event Bank is licensed under `AGPL-3.0-only`. By submitting a contribution, you agree that it is
-licensed under the same terms.
+Event Bank currently has no license, and no terms for contributions have been set. Contact the
+maintainer before contributing.

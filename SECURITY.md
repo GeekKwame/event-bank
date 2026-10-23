@@ -46,8 +46,11 @@ Source URLs come from users and are fetched by the server. Controls in `backend/
 
 ### Third-party data
 
-- Luma is accessed only through its official API, as its Terms of Use require. No luma.com pages are
-  scraped, and the test fixtures are synthetic.
+- Luma is accessed only through publicly supported interfaces (its free iCal subscription feeds and
+  its official API), as its Terms of Use require. No luma.com pages are scraped, and the test
+  fixtures are synthetic.
+- The iCal connector rejects personal feeds (`entity=user`), which carry a private token, and
+  never reads organiser or attendee data or stores link-type locations such as meeting URLs.
 - Only public events managed by the registered calendar are stored. Events managed by other hosts
   are excluded. Guest-only addresses are reduced to the city. Meeting links and submitter details
   (including emails) are never stored, and personal calendar names are not stored as organisers.
